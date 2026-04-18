@@ -1,0 +1,29 @@
+# 轨迹流水线与提前预警（阶段2）
+# ROI 使用归一化坐标 [0,1]，相对当前视频帧宽高。
+
+roi:
+  mode: rectangle
+  # 全画面：便于 RepCount 等测试；园区部署请改为多边形或更小矩形。
+  rect_norm: [0.0, 0.0, 1.0, 1.0]
+  # mode: polygon 时启用，例如：
+  # polygon_norm: [[0.1, 0.2], [0.9, 0.2], [0.9, 0.8], [0.1, 0.8]]
+
+early_warning:
+  # 相对「单纯进入 ROI 即报警」：此处要求停留时长 / 折返次数才升级，见 docs/pipeline_alerts.md
+  dwell_warning_sec: 1.2
+  dwell_alert_sec: 3.0
+  reversal_alert_k: 4
+  # true：首帧检测框与 ROI 有交集即报 intrusion_simple（对照实验）
+  simple_intrusion_mode: false
+
+debounce:
+  cooldown_sec: 12.0
+  consecutive_frames_for_escalation: 4
+
+video:
+  weights: yolov10s.pt
+  conf: 0.35
+  embedder_gpu: 0
+
+# 轨迹点批量写入：每积累 N 行 flush 一次
+batch_insert_frames: 400

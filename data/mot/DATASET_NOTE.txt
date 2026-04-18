@@ -1,0 +1,26 @@
+MOTChallenge 数据用于本项目的说明（参赛材料建议保留本说明）
+============================================================
+
+1) 官方来源
+   - 主页: https://motchallenge.net/
+   - MOT17 下载页: https://motchallenge.net/data/MOT17/
+   - 完整图像包一般为 MOT17.zip（体积较大），解压后每条序列是一个文件夹，内含 seqinfo.ini 与 img1/（逐帧 jpg）。
+
+2) 合成为整段 mp4
+   - 在项目根目录执行:
+     python scripts/mot_seq_folder_to_mp4.py --seq "你的路径/MOT17-05-DPM"
+   - 默认输出: data/videos/MOT17-05-DPM.mp4
+   - 再运行:
+     python video_tracker.py --video data/videos/MOT17-05-DPM.mp4
+
+3) 版权与使用范围（重要，非法律意见）
+   - MOT 系列是公开的计算机视觉研究基准数据，通常用于学术研究、算法评测与教学演示。
+   - 具体条款以官网及下载时提供的说明为准；若大赛要求「素材来源说明」，请在作品文档中写明：
+     数据集名称（如 MOT17）、官方链接、用途（算法验证/演示）。
+   - 若赛事对「可公开展示的人物影像」有单独规定，请对照大赛章程；如有疑问应咨询指导老师或组委会。
+   - 不要将数据集用于与许可相冲突的商业用途；参赛答辩一般属于学术展示，但仍建议保留上述引用说明。
+
+4) 论文引用（写报告/说明书时可引用）
+   - MOT16: Milan et al., arXiv:1603.00831
+   - MOT15: Leal-Taixe et al., arXiv:1504.01942
+   详见官网 References 栏目。

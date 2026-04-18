@@ -1,0 +1,54 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local DB & secrets（队友本地各自生成）
+database/*.db
+database/*.db-journal
+.env
+.env.local
+.env.*.local
+
+# Node（根目录若将来有脚本也会忽略）
+node_modules/
+
+# Next.js（frontend 子目录）
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+frontend/.turbo/
+
+# 关键帧等大文件：保留目录，不提交具体图片
+storage/frames/*
+!storage/frames/.gitkeep
+
+# 模型权重等（若以后下载到仓库内）
+*.pt
+*.pth
+*.onnx
+*.engine
+
+# IDE / OS
+.cursor/
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+logs/

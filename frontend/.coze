@@ -1,0 +1,15 @@
+[project]
+requires = [ "nodejs-24" ]
+template = "nextjs"
+version = "0.0.14"
+appliedPatches = [ ]
+
+[dev]
+build = [ "bash", "./scripts/prepare.sh" ]
+run = [ "bash", "./scripts/dev.sh" ]
+deps = [ "git" ]
+
+[deploy]
+build = [ "bash", "./scripts/build.sh" ]
+run = [ "bash", "./scripts/start.sh" ]
+deps = [ "git" ]
