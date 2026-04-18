@@ -7,7 +7,14 @@ from fastapi.staticfiles import StaticFiles
 import app.models  # noqa: F401 — register ORM tables on Base.metadata
 from app.config import settings
 from app.database import Base, SessionLocal, engine, ensure_sqlite_migrations
-from app.routers import alerts_routes, auth_routes, cameras_routes, dashboard_routes, jobs_routes
+from app.routers import (
+    alerts_routes,
+    auth_routes,
+    cameras_routes,
+    dashboard_routes,
+    jobs_routes,
+    settings_routes,
+)
 from app.seed import seed_users_if_empty
 
 
@@ -35,6 +42,7 @@ app.include_router(alerts_routes.router, prefix="/alerts", tags=["alerts"])
 app.include_router(cameras_routes.router, prefix="/cameras", tags=["cameras"])
 app.include_router(jobs_routes.router, prefix="/jobs", tags=["jobs"])
 app.include_router(dashboard_routes.router, prefix="/dashboard", tags=["dashboard"])
+app.include_router(settings_routes.router, prefix="/settings", tags=["settings"])
 
 app.add_middleware(
     CORSMiddleware,

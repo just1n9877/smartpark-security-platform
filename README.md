@@ -2,6 +2,26 @@
 
 后端：FastAPI + SQLAlchemy + SQLite；**前端：Next.js 16 + React + Tailwind（`frontend/`）**，与 FastAPI 直连联调。轨迹与告警流水线见 `services/` 与 `config/pipeline_alerts.yaml`。
 
+**技术栈说明（与部分任务书默认值差异）**：前端实现为 **Next.js**（非 Vue3 + Element Plus）；交付含 **`docker compose` 一键启动**（阶段5），详见下文「Docker」。
+
+## Docker 一键启动（阶段5）
+
+需安装 [Docker](https://docs.docker.com/get-docker/) 与 Docker Compose v2。
+
+```bash
+cd /path/to/智慧园区安防AI管理与仿真平台
+docker compose up --build
+```
+
+- 后端：<http://127.0.0.1:8000/docs>  
+- 前端：<http://127.0.0.1:3000>（构建参数 `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000`，浏览器在宿主机访问后端同址）  
+- **持久化**：命名卷挂载 `database/`、`storage/`；`config/` 与 `data/` 以只读绑定挂载自宿主机。  
+- **跑流水线**：将测试 mp4 放在 **`data/videos/`**，调用 `POST /jobs/run_local_path`，body 中 `path` 使用容器路径 **`/app/data/videos/文件名.mp4`**。  
+- 首次运行会下载 YOLO 权重，已挂载 `ultralytics-cache` 卷以复用缓存；CPU 推理较慢属正常。  
+- 生产环境请设置环境变量 **`JWT_SECRET`**（可在 compose 同目录 `.env` 中配置）。
+
+手动验证清单：**[TESTING.md](./TESTING.md)**。
+
 ## 数据集表述（诚实说明）
 
 先验数据（如 **RepCount / LLSP**）为健身/重复动作类视频，**仅用于轨迹流水线与算法验证**；**不得**在文档或界面中将其表述为「园区行人行走数据集」。园区演示请使用自采视频或后续补充数据。
@@ -66,4 +86,6 @@ npm run start
 
 - 后端细节：`backend/README.md`
 - 流水线与验收：`docs/pipeline_alerts.md`、`docs/acceptance_p0.md`
+- P0 手动验证（命令级）：`TESTING.md`
 - 前端补充说明：`frontend/README.md`
+- 镜像构建：`docker/Dockerfile.backend`、`docker/Dockerfile.frontend`、`docker-compose.yml`

@@ -1,0 +1,21 @@
+.git
+.cursor
+.idea
+**/.venv
+**/venv
+**/__pycache__
+*.py[cod]
+*.db-journal
+
+frontend/node_modules
+frontend/.next
+
+# 运行时由卷挂载持久化
+database/*.db
+
+storage/frames/*
+!storage/frames/.gitkeep
+
+**/npm-debug.log
+**/.DS_Store
+bus.jpg

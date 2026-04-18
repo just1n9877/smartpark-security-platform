@@ -125,6 +125,25 @@ class Alert(Base):
     feedbacks: Mapped[list[Feedback]] = relationship("Feedback", back_populates="alert")
 
 
+class SystemConfig(Base):
+    """单例行 id=1：流水线去抖/预警阈值（可由反馈统计自动收紧，或 admin 重置为 YAML 基准）。"""
+
+    __tablename__ = "system_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False, default=1)
+    consecutive_frames_for_escalation: Mapped[int] = mapped_column(Integer, default=4)
+    dwell_warning_sec: Mapped[float] = mapped_column(Float, default=1.2)
+    dwell_alert_sec: Mapped[float] = mapped_column(Float, default=3.0)
+    cooldown_sec: Mapped[float] = mapped_column(Float, default=12.0)
+    reversal_alert_k: Mapped[int] = mapped_column(Integer, default=4)
+    feedback_window_n: Mapped[int] = mapped_column(Integer, default=20)
+    high_fp_threshold: Mapped[float] = mapped_column(Float, default=0.4)
+    max_consecutive_frames: Mapped[int] = mapped_column(Integer, default=12)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class Feedback(Base):
     __tablename__ = "feedbacks"
 

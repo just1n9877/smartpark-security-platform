@@ -110,3 +110,74 @@ export type FeedbackLabel =
   | 'work'
   | 'suspicious'
   | 'other';
+
+export type UserPublic = {
+  id: number;
+  username: string;
+  role: 'admin' | 'guard';
+};
+
+export type PipelineSettingsBlock = {
+  consecutive_frames_for_escalation: number;
+  dwell_warning_sec: number;
+  dwell_alert_sec: number;
+  cooldown_sec: number;
+  reversal_alert_k: number;
+};
+
+export type FeedbackRollupStats = {
+  sample_size: number;
+  false_positives: number;
+  false_positive_rate: number | null;
+};
+
+export type CameraFeedbackRollup = {
+  camera_id: number | null;
+  camera_name: string;
+  sample_size: number;
+  false_positives: number;
+  false_positive_rate: number | null;
+};
+
+export type SettingsOut = {
+  effective: PipelineSettingsBlock;
+  yaml_baseline: PipelineSettingsBlock;
+  tuning: {
+    feedback_window_n: number;
+    high_fp_threshold: number;
+    max_consecutive_frames: number;
+    updated_at: string;
+  };
+  feedback_rollup: {
+    window_n: number;
+    global: FeedbackRollupStats;
+    by_camera: CameraFeedbackRollup[];
+  };
+};
+
+export type SettingsPatch = {
+  reset_to_yaml_defaults?: boolean;
+  consecutive_frames_for_escalation?: number;
+  dwell_warning_sec?: number;
+  dwell_alert_sec?: number;
+  cooldown_sec?: number;
+  reversal_alert_k?: number;
+  feedback_window_n?: number;
+  high_fp_threshold?: number;
+  max_consecutive_frames?: number;
+};
+
+export async function fetchMe(): Promise<UserPublic> {
+  return apiFetch<UserPublic>('/auth/me');
+}
+
+export async function fetchSettings(): Promise<SettingsOut> {
+  return apiFetch<SettingsOut>('/settings');
+}
+
+export async function patchSettings(body: SettingsPatch): Promise<SettingsOut> {
+  return apiFetch<SettingsOut>('/settings', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}

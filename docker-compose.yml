@@ -1,0 +1,38 @@
+# 智慧园区安防平台：后端 FastAPI + Next.js（standalone）
+# 使用：在项目根执行  docker compose up --build
+#
+# 持久化：database/、storage/ 挂载到命名卷。
+# 流水线读视频：将 mp4 放到 ./data/videos/（或自定义挂载），请求体 path 使用容器内路径 /app/data/videos/xxx.mp4
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite:////app/database/app.db
+      JWT_SECRET: ${JWT_SECRET:-docker-dev-change-me}
+    volumes:
+      - smartguard-database:/app/database
+      - smartguard-storage:/app/storage
+      - ultralytics-cache:/root/.cache
+      - ./config:/app/config:ro
+      - ./data:/app/data:ro
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  smartguard-database:
+  smartguard-storage:
+  ultralytics-cache:

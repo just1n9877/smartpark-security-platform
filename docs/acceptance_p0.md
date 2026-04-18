@@ -1,10 +1,12 @@
 # P0 验收主线（阶段进度）
 
-本文档逐条对应项目 P0 要求，并标注**阶段1 / 阶段2 / 阶段3**完成情况。
+本文档逐条对应项目 P0 要求，并标注**阶段1～5**进度（含历史快照表）。
 
 **前端为 Next.js 16 + React**（目录 `frontend/`，`npm run dev` 默认 <http://127.0.0.1:3000>）。
 
-下表**阶段1 / 阶段2**行为「各该阶段结束时的快照」，便于对照原始计划；**当前实现**已覆盖至阶段3（Next 联调）。
+下表**阶段1 / 阶段2**为历史快照；**当前实现**已覆盖至**阶段5**（`docker compose`、持久化卷、`TESTING.md`）。
+
+**技术栈（与任务书默认值差异说明）**：后端为 **FastAPI + SQLAlchemy + SQLite**；前端为 **Next.js 16 + React**（非 Vue3 + Element Plus）；交付 **Docker Compose**（`docker-compose.yml` + `docker/Dockerfile.*`），与源码启动并行见根目录 `README.md`。
 
 ---
 
@@ -40,6 +42,27 @@
 | 4 | CORS / 环境变量 | ☑ 后端 `main.py` 放行 `3000`/`5000` 等；`NEXT_PUBLIC_API_BASE_URL` |
 | 5 | 文案与数据诚实 | ☑ 未将 RepCount 标为园区数据集；无依据指标已弱化或标注占位 |
 
+**阶段4 勾选总览（闭环：反馈统计 + SystemConfig + 设置 API）**
+
+| # | 验收项 | 阶段4（当前） |
+|---|--------|----------------|
+| F1 | 误报滚动统计（全局 + 按摄像头最近 N 条） | ☑ `GET /settings` → `feedback_rollup` |
+| F2 | 误报率高则自动收紧（实现 M↑） | ☑ `recalc_after_feedback`：`M=min(M+1,max)`；参数存 `system_configs` |
+| F3 | `GET /settings`、`PATCH /settings`（admin） | ☑ 已挂载；重置为 YAML 见 `reset_to_yaml_defaults` |
+| F4 | 告警创建读当前阈值；反馈后异步重算 | ☑ `pipeline_runner` 默认 `effective_config_for_pipeline`；反馈 `BackgroundTasks` |
+| F5 | 演示文档 | ☑ `docs/demo_script.md` |
+| F6 | 数据域诚实 | ☑ 与 §6 / README 一致 |
+
+**阶段5 勾选总览（容器化与交付）**
+
+| # | 验收项 | 阶段5（当前） |
+|---|--------|----------------|
+| D1 | Dockerfile（backend）+ 前端多阶段构建 | ☑ `docker/Dockerfile.backend`、`docker/Dockerfile.frontend`（Next `standalone`） |
+| D2 | compose 多服务 + SQLite / storage 挂载 | ☑ `docker-compose.yml`：命名卷 `database`、`storage`，只读挂载 `config`、`data` |
+| D3 | 一键启动与 README | ☑ 根 `README.md`「Docker」节 |
+| D4 | TESTING.md 按 P0 手动验证 | ☑ 根 `TESTING.md` |
+| D5 | 数据域诚实 | ☑ 与 §6 / `TESTING.md` 首段一致 |
+
 ---
 
 ## 1) 轨迹：从视频抽出 track 序列，落库或 CSV，可查询
@@ -64,13 +87,14 @@
 
 - [x] **反馈写入**：`POST /alerts/{id}/feedback` + `Feedback` 表（标签枚举 + 备注）。
 - [x] **Next 前端（阶段3）**：`frontend/` 中 `/alerts` 展开项内可提交反馈，与后端枚举一致。
-- [ ] **反馈后策略/阈值变化**（阶段4）：仍待后续（如 `SystemConfig` + `/settings`）。
+- [x] **反馈后策略/阈值变化（阶段4）**：`SystemConfig` 表；滚动误报率超阈值则 **确认帧数 M** 自动 +1（ capped ）；`GET/PATCH /settings`；`/settings` 页「预警策略」；详见 `docs/demo_script.md`。
 
 ## 5) 工程：后端 API + 数据库 + 前端管理端 + 简单数据大屏（≥4 图表）+ README 可复现
 
 - [x] **后端 API + SQLite + README**：见 `backend/README.md`。
 - [x] **Next 管理端与图表（阶段3）**：`frontend/src/app/dashboard/page.tsx`、`analytics/page.tsx` 等对接真实 API；根 `README.md` 已写 Next 启动方式。
 - [x] **阶段2 API**：`GET /jobs/{id}`、`POST /jobs/run_local_path`（异步流水线）。
+- [x] **阶段5 容器化交付**：`docker compose up --build`；`TESTING.md` 命令级验证；新机器以 Docker 或源码均可复现（见根 `README.md`）。
 
 ## 6) 数据集说明诚实
 
@@ -82,10 +106,14 @@
 
 ## 自检清单（维护用）
 
-| 条目 | 阶段1 | 阶段2 | 阶段3（Next） |
-|------|--------|--------|----------------|
-| 未虚构「园区行走数据集」 | ☑ | ☑ | ☑ |
-| `video_tracker.py` 保留不破坏 | ☑（未删改逻辑，仅改为 import 共用模块） | ☑ | ☑ |
+| 条目 | 阶段1 | 阶段2 | 阶段3（Next） | 阶段4 | 阶段5 |
+|------|--------|--------|----------------|--------|--------|
+| 未虚构「园区行走数据集」 | ☑ | ☑ | ☑ | ☑ | ☑ |
+| `video_tracker.py` 保留不破坏 | ☑（未删改逻辑，仅改为 import 共用模块） | ☑ | ☑ | ☑ | ☑ |
+| 改配置后新告警行为可见变化 | ☐ | ☐ | ☐ | ☑（日志 `debounce M=` + 同视频告警计数） | ☑ |
+| P0「闭环」含可演示调参 | ☐ | ☐ | 部分 | ☑ | ☑ |
+| 新机器 Docker 可跑通 | ☐ | ☐ | ☐ | ☐ | ☑（见 `TESTING.md` §0） |
+| TESTING.md 覆盖 P0 | ☐ | ☐ | ☐ | ☐ | ☑ |
 
 ---
 
@@ -124,11 +152,37 @@
 | `frontend/src/app/analytics/page.tsx` | 数据分析 |
 | `frontend/src/components/Sidebar.tsx` | 导航与退出清除令牌 |
 
+**阶段4 主要路径（补充）**
+
+| 路径 | 说明 |
+|------|------|
+| `backend/app/models.py` | `SystemConfig` 单行表 |
+| `backend/app/system_config_service.py` | YAML 合并、滚动误报率、自动 M、重置 |
+| `backend/app/routers/settings_routes.py` | `GET/PATCH /settings` |
+| `backend/app/routers/auth_routes.py` | `GET /auth/me` |
+| `backend/app/routers/alerts_routes.py` | 反馈后 `BackgroundTasks` 调自动收紧 |
+| `services/pipeline_runner.py` | 默认从 DB 读生效阈值；显式 `config_path` 时仅用 YAML（批处理可复现） |
+| `docs/demo_script.md` | 同视频前后对比演示步骤 |
+
+**阶段5 主要路径（补充）**
+
+| 路径 | 说明 |
+|------|------|
+| `docker-compose.yml` | backend + frontend，命名卷与只读挂载 |
+| `docker/Dockerfile.backend` | Python 3.11、CPU PyTorch、流水线依赖、`PYTHONPATH=/app` |
+| `docker/Dockerfile.frontend` | Node 20 构建 + `standalone` 运行 |
+| `.dockerignore` | 减小构建上下文 |
+| `TESTING.md` | P0 命令级验证 |
+| `data/videos/.gitkeep` | 挂载演示视频目录占位 |
+
 ---
 
 ## 与验收清单的偏差与修正计划（诚实说明）
 
-1. **RepCount/LLSP 表述**：验收文档与 README「数据」节一致；**无「编造园区数据集」表述**。
-2. **P0 仍待项**：**反馈驱动策略/阈值（阶段4）**、**轨迹 CSV 导出（非强制）**、Docker/TESTING 等可后续补齐。
-3. **「闭环」验收**：反馈 API + **Next 前端提交**已具备；**「反馈后自动调参」**仍待阶段4。
-4. **阶段2 范围边界**：流水线在无检出目标时不会产生 `TrajectoryPoint`/摘要/告警（属正常）；完整 P0 演示需使用**含可检测行人**的视频（如 RepCount 片段或自采园区视频），且园区场景数据须单独说明来源。
+1. **RepCount/LLSP 表述**：验收文档、README、`TESTING.md` 首段一致；**无「编造园区数据集」表述**；阶段4 `docs/demo_script.md` **§A** 再次强调先验数据域。
+2. **P0 与当前交付**：**Docker Compose** 已于阶段5 交付；**轨迹 CSV 导出**仍为可选增强（P0「落库**或** CSV」以入库为准，不构成本项目硬性偏离）。
+3. **技术栈默认值**：任务书默认 **Vue3 + Element Plus**；本仓库前端为 **Next.js**（见文首说明），README 已写清。
+4. **「闭环」验收**：反馈 API + Next 提交 + **`SystemConfig`** + **`/settings`** + 演示文档，**已闭环**。
+5. **阶段2 范围边界**：流水线在无检出目标时不会产生 `TrajectoryPoint`/摘要/告警（属正常）；完整 P0 演示需使用**含可检测行人**的视频（如 RepCount 片段或自采园区视频），且园区场景数据须单独说明来源。
+6. **批处理与 DB 配置**：`run_pipeline_for_job(..., config_path=Path(...))` 时**不合并** `SystemConfig`，便于离线复现 YAML；API 触发的 `run_local_path` **合并** DB，与「管理端调参生效」一致。
+7. **阶段5 自检结论**：对照 P0 主线**无未修正偏离**；可选增强（如离线 CSV、Vue 前端重写）不在验收主线内。

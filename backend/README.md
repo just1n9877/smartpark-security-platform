@@ -1,6 +1,6 @@
-# 后端 API（阶段1 + 阶段2）
+# 后端 API（阶段1–4）
 
-FastAPI + SQLAlchemy + SQLite（`../database/app.db`）。阶段2 增加：YOLOv10 + DeepSORT 轨迹入库、提前预警、去抖、异步任务。
+FastAPI + SQLAlchemy + SQLite（`../database/app.db`）。阶段2：YOLOv10 + DeepSORT 轨迹入库、提前预警、去抖、异步任务。阶段4：`system_configs` 生效阈值、`GET/PATCH /settings`、反馈后自动收紧确认帧数 M。
 
 ## 环境
 
@@ -36,8 +36,9 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ## 流水线配置
 
-- 预警阈值、ROI、去抖：`config/pipeline_alerts.yaml`
-- 说明：`docs/pipeline_alerts.md`
+- 预警阈值、ROI、去抖：`config/pipeline_alerts.yaml`（**基准**）
+- 运行 **`POST /jobs/run_local_path`**（未传自定义 `config_path`）时，去抖/预警数值以数据库表 **`system_configs`**（id=1）为准，启动任务时在日志中打印当前 `debounce M=` 等。
+- 说明：`docs/pipeline_alerts.md`；阶段4 演示：`docs/demo_script.md`
 
 ## 默认账号（种子用户）
 
@@ -61,13 +62,16 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 首次启动会 `create_all` 建表；若旧库缺 `alerts.job_id` 列，启动时会尝试 `ALTER TABLE` 补列。未使用 Alembic。
 
-## 阶段2 / 阶段3 API 摘要
+## API 摘要
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
+| GET | `/auth/me` | 当前用户（角色，供前端区分 admin） |
 | GET | `/alerts` | 告警列表；支持 `level`、`skip`、`limit` |
 | GET | `/alerts/{id}` | 告警详情 |
-| POST | `/alerts/{id}/feedback` | 闭环反馈 |
+| POST | `/alerts/{id}/feedback` | 闭环反馈（提交后异步重算误报率，必要时 **M+1**） |
+| GET | `/settings` | 需登录；生效阈值、YAML 基准、滚动误报统计（全局 + 按摄像头） |
+| PATCH | `/settings` | **admin**；改参或 `{"reset_to_yaml_defaults": true}` 恢复 YAML |
 | GET | `/dashboard/summary` | 大屏统计（今日告警、近 7 日、反馈误报率、任务状态等） |
 | GET | `/jobs` | 最近分析任务列表 |
 | GET | `/jobs/{job_id}` | 任务状态与轨迹点/摘要/告警计数 |
@@ -76,6 +80,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 静态文件：关键帧图片位于项目根 `storage/frames/`，HTTP 路径为 **`GET /media/frames/...`**（与 `keyframe_path` 中 `storage/frames/...` 对应）。
 
 前端（Next.js）见项目根 **`frontend/`** 与根目录 **`README.md`**。
+
+## Docker（阶段5）
+
+一键启动、卷挂载与容器内视频路径见项目根 **`README.md`**（Docker 一节）、**`docker-compose.yml`**、**`TESTING.md`**。
 
 ## curl 示例（bash）
 

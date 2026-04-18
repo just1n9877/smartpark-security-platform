@@ -1,13 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   User, Users, Shield, Bell, Lock, Eye, EyeOff,
-  Save, Plus, Edit, Trash2, Key, Upload, ToggleLeft, ToggleRight
+  Save, Plus, Edit, Trash2, Key, Upload, ToggleLeft, ToggleRight, SlidersHorizontal,
 } from 'lucide-react';
 import { Sidebar, Header } from '@/components/Sidebar';
+import { fetchMe, fetchSettings, patchSettings, type SettingsOut, type UserPublic } from '@/lib/api';
 
 const tabs = [
+  { id: 'pipeline', label: '预警策略', icon: SlidersHorizontal },
   { id: 'profile', label: '个人信息', icon: User },
   { id: 'users', label: '用户管理', icon: Users },
   { id: 'roles', label: '角色权限', icon: Shield },
@@ -16,8 +18,59 @@ const tabs = [
 ];
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('profile');
+  const [activeTab, setActiveTab] = useState('pipeline');
   const [showPassword, setShowPassword] = useState(false);
+  const [me, setMe] = useState<UserPublic | null>(null);
+  const [st, setSt] = useState<SettingsOut | null>(null);
+  const [pipeErr, setPipeErr] = useState<string | null>(null);
+  const [pipeBusy, setPipeBusy] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== 'pipeline') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [u, s] = await Promise.all([fetchMe(), fetchSettings()]);
+        if (!cancelled) {
+          setMe(u);
+          setSt(s);
+          setPipeErr(null);
+        }
+      } catch (e) {
+        if (!cancelled) setPipeErr(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
+
+  async function refreshPipeline() {
+    setPipeBusy(true);
+    try {
+      const s = await fetchSettings();
+      setSt(s);
+      setPipeErr(null);
+    } catch (e) {
+      setPipeErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPipeBusy(false);
+    }
+  }
+
+  async function resetYamlDefaults() {
+    if (!me || me.role !== 'admin') return;
+    setPipeBusy(true);
+    try {
+      const s = await patchSettings({ reset_to_yaml_defaults: true });
+      setSt(s);
+      setPipeErr(null);
+    } catch (e) {
+      setPipeErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPipeBusy(false);
+    }
+  }
 
   return (
     <Sidebar currentPath="/settings">
@@ -49,6 +102,107 @@ export default function SettingsPage() {
 
         {/* 主内容区 */}
         <div className="flex-1 overflow-y-auto p-6">
+          {activeTab === 'pipeline' && (
+            <div className="max-w-3xl space-y-6">
+              <div>
+                <h3 className="text-lg font-bold text-white mb-1">预警与去抖（SystemConfig）</h3>
+                <p className="text-sm text-slate-400">
+                  与验收阶段4一致：流水线日志会打印当前确认帧数 M；误报反馈滚动统计超阈值时自动 M+1（见{' '}
+                  <code className="text-cyan-400/90">docs/demo_script.md</code>）。先验视频域说明见 README，勿将 RepCount 表述为园区行走数据。
+                </p>
+              </div>
+              {pipeErr && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                  {pipeErr}
+                </div>
+              )}
+              {!st && !pipeErr && (
+                <p className="text-slate-400 text-sm">加载中…</p>
+              )}
+              {st && (
+                <>
+                  <div className="dashboard-card rounded-2xl p-5 space-y-4">
+                    <h4 className="text-white font-medium">当前生效（DB + YAML 基准合并）</h4>
+                    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <dt className="text-slate-500">确认帧数 M</dt>
+                        <dd className="text-cyan-300 font-mono">{st.effective.consecutive_frames_for_escalation}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-500">预警停留阈值（s）</dt>
+                        <dd className="text-slate-200 font-mono">
+                          warn {st.effective.dwell_warning_sec.toFixed(2)} / alert {st.effective.dwell_alert_sec.toFixed(2)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-500">冷却（s）</dt>
+                        <dd className="text-slate-200 font-mono">{st.effective.cooldown_sec.toFixed(1)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-500">折返告警阈值 K</dt>
+                        <dd className="text-slate-200 font-mono">{st.effective.reversal_alert_k}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                  <div className="dashboard-card rounded-2xl p-5 space-y-2">
+                    <h4 className="text-white font-medium">YAML 文件基准（config/pipeline_alerts.yaml）</h4>
+                    <p className="text-xs text-slate-500 font-mono">
+                      M={st.yaml_baseline.consecutive_frames_for_escalation} · dwell_warn={st.yaml_baseline.dwell_warning_sec} ·
+                      dwell_alert={st.yaml_baseline.dwell_alert_sec}
+                    </p>
+                  </div>
+                  <div className="dashboard-card rounded-2xl p-5 space-y-3">
+                    <h4 className="text-white font-medium">自动调参参数</h4>
+                    <p className="text-sm text-slate-400">
+                      窗口 N={st.tuning.feedback_window_n}，误报率阈值={st.tuning.high_fp_threshold}，M 上限=
+                      {st.tuning.max_consecutive_frames}；更新 {new Date(st.tuning.updated_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="dashboard-card rounded-2xl p-5 space-y-3">
+                    <h4 className="text-white font-medium">滚动误报率（最近 N 条反馈）</h4>
+                    <p className="text-sm text-slate-400">
+                      全局：样本 {st.feedback_rollup.global.sample_size}，误报 {st.feedback_rollup.global.false_positives}
+                      {st.feedback_rollup.global.false_positive_rate != null
+                        ? `，率 ${(st.feedback_rollup.global.false_positive_rate * 100).toFixed(1)}%`
+                        : ''}
+                    </p>
+                    <div className="max-h-48 overflow-y-auto text-xs text-slate-500 space-y-1">
+                      {st.feedback_rollup.by_camera.map((c) => (
+                        <div key={`${c.camera_id ?? 'na'}-${c.camera_name}`}>
+                          {c.camera_name}: n={c.sample_size} fp={c.false_positives}
+                          {c.false_positive_rate != null ? ` (${(c.false_positive_rate * 100).toFixed(1)}%)` : ''}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => refreshPipeline()}
+                      disabled={pipeBusy}
+                      className="px-4 py-2 rounded-xl bg-slate-700 text-white text-sm hover:bg-slate-600 disabled:opacity-50"
+                    >
+                      刷新
+                    </button>
+                    {me?.role === 'admin' && (
+                      <button
+                        type="button"
+                        onClick={() => resetYamlDefaults()}
+                        disabled={pipeBusy}
+                        className="px-4 py-2 rounded-xl bg-cyan-600 text-white text-sm hover:bg-cyan-500 disabled:opacity-50"
+                      >
+                        恢复 YAML 默认
+                      </button>
+                    )}
+                    {me && me.role !== 'admin' && (
+                      <span className="text-xs text-slate-500 self-center">仅管理员可 PATCH 重置，当前为值班账号。</span>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {activeTab === 'profile' && (
             <div className="max-w-2xl">
               <h3 className="text-lg font-bold text-white mb-6">个人信息</h3>

@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, ensure_sqlite_migrations
 from app.models import Alert, AnalysisJob, JobStatus, TrajectoryPoint, TrajectorySummary
+from app.system_config_service import effective_config_for_pipeline
 from services.alert_engine import AlertEngine
 from services.pipeline_config import load_pipeline_config
 from services.tracking_pipeline import TrackingPipeline
@@ -42,7 +43,6 @@ def run_pipeline_for_job(
 ) -> None:
     """执行完整流水线；异常时将 job 标为 failed。"""
     video_path = Path(video_path).resolve()
-    cfg = load_pipeline_config(config_path, _ROOT)
     frames_dir = _ROOT / "storage" / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
 
@@ -55,6 +55,17 @@ def run_pipeline_for_job(
         job.status = JobStatus.running
         job.error_message = None
         db.commit()
+
+        if config_path is not None:
+            cfg = load_pipeline_config(config_path, _ROOT)
+        else:
+            cfg = effective_config_for_pipeline(db)
+
+        print(
+            f"[pipeline job={job_id}] debounce M={cfg.consecutive_frames_for_escalation} "
+            f"dwell_warn={cfg.dwell_warning_sec:.2f}s dwell_alert={cfg.dwell_alert_sec:.2f}s "
+            f"cooldown={cfg.cooldown_sec:.1f}s"
+        )
 
         db.query(TrajectoryPoint).filter(TrajectoryPoint.job_id == job_id).delete(
             synchronize_session=False
