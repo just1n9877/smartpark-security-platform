@@ -1,19 +1,39 @@
-# 提前预警与去抖（阶段2）
+# 提前预警与去抖说明（阶段2）
 
-## 与「进线即报警」的区别
+一、这份文档讲什么
 
-- **单纯入侵（对照）**：`config/pipeline_alerts.yaml` 中 `simple_intrusion_mode: true` 时，目标检测框与 ROI 一旦出现交集即产生 `intrusion_simple` 类告警（边沿触发一次，仍受冷却约束）。
-- **提前预警（默认）**：`simple_intrusion_mode: false` 时，**不**因首次进入 ROI 即升级为高等级告警；需满足：
-  - **warning**：在 ROI 内累计停留时间 ≥ `dwell_warning_sec`（秒）；
-  - **alert**：停留 ≥ `dwell_alert_sec`，**或** 轨迹折返启发式计数 ≥ `reversal_alert_k`。
+这里主要解释两件事：
 
-上述阈值与「仅入侵」路径在 `services/alert_engine.py` 中分支实现。
+1. 系统什么时候判定为 `warning` 或 `alert`
+2. 为什么不会每一帧都疯狂刷告警（去抖机制）
 
-## 去抖
+---
 
-- **冷却**：同一 `track_id` 在 `cooldown_sec` 内不重复新建 `Alert` 记录（避免同 ID 刷屏）。
-- **连续确认**：满足某级别条件时，需连续 `consecutive_frames_for_escalation` 帧仍满足，才写入该级别告警，并将 `is_confirmed` 置为 true。
+二、「进线即报警」和「提前预警」的区别
 
-## 可调参数
+1) 单纯入侵模式（对照）
 
-见项目根目录 `config/pipeline_alerts.yaml`。
+- 当 `simple_intrusion_mode: true` 时，目标框和 ROI 一有交集，就触发 `intrusion_simple`
+- 这个模式是边沿触发一次，不会连续每帧都重复发，但仍受冷却约束
+
+2) 提前预警模式（默认）
+
+- 当 `simple_intrusion_mode: false` 时，首次进入 ROI 不会立刻升级高等级告警
+- 需要满足以下条件才触发：
+  - `warning`：ROI 累计停留时间 >= `dwell_warning_sec`
+  - `alert`：停留时间 >= `dwell_alert_sec`，或折返计数 >= `reversal_alert_k`
+
+相关分支逻辑在 `services/alert_engine.py`。
+
+---
+
+三、去抖机制
+
+- 冷却机制：同一 `track_id` 在 `cooldown_sec` 时间内不重复落告警，避免刷屏
+- 连续确认：满足条件后，还要连续满足 `consecutive_frames_for_escalation` 帧，才真正写入告警并标记 `is_confirmed=true`
+
+---
+
+四、参数在哪调
+
+统一在项目根目录的 `config/pipeline_alerts.yaml` 调整。

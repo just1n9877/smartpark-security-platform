@@ -52,3 +52,7 @@ Desktop.ini
 # Logs
 *.log
 logs/
+
+# 外部数据集原始帧/大体积导出（可选；见 docs/dataset_shanghai.md）
+data/external/**
+!data/external/.gitkeep
