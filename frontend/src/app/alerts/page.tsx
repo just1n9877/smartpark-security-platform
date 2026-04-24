@@ -4,17 +4,23 @@ import { useMemo, useState } from 'react';
 import useSWR from 'swr';
 import {
   AlertTriangle, Search, RefreshCw, Check, Clock, MapPin,
-  Eye, ChevronDown, Shield, Users, UserX, ArrowUpDown, Bell, Zap, Loader2,
+  Eye, ChevronDown, Shield, Users, UserX, ArrowUpDown, Bell, Zap, Loader2, Brain,
 } from 'lucide-react';
 import { Sidebar, Header } from '@/components/Sidebar';
 import {
   apiFetch,
+  fetchAlertTrajectory,
   keyframeToUrl,
+  type AlertTrajectory,
   type ApiAlert,
   type FeedbackLabel,
 } from '@/lib/api';
 
 const alertsFetcher = () => apiFetch<ApiAlert[]>('/alerts?limit=200');
+
+function trajectoryFetcher(id: number) {
+  return () => fetchAlertTrajectory(id);
+}
 
 /** 后端 level → 卡片用 */
 function uiLevel(raw: string): 'critical' | 'warning' | 'medium' | 'low' {
@@ -47,6 +53,8 @@ const typeIcon: Record<string, React.ElementType> = {
   trajectory_warning: Zap,
   dwell_warning: Clock,
   roi_intrusion: Shield,
+  trajectory_ml_iforest: Brain,
+  trajectory_ml_gru: Brain,
   default: AlertTriangle,
 };
 
@@ -60,12 +68,19 @@ const FEEDBACK_OPTIONS: { value: FeedbackLabel; label: string }[] = [
 ];
 
 export default function AlertsPage() {
+  const [expandedAlert, setExpandedAlert] = useState<number | null>(null);
+
   const { data, error, isLoading, mutate } = useSWR('alerts-list', alertsFetcher, {
     refreshInterval: 8000,
     revalidateOnFocus: true,
   });
 
-  const [expandedAlert, setExpandedAlert] = useState<number | null>(null);
+  const trajKey = expandedAlert ? `alert-traj-${expandedAlert}` : null;
+  const { data: trajData } = useSWR<AlertTrajectory>(
+    trajKey,
+    expandedAlert ? trajectoryFetcher(expandedAlert) : null,
+    { revalidateOnFocus: false },
+  );
   const [filterLevel, setFilterLevel] = useState<string>('all');
   const [filterConfirmed, setFilterConfirmed] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'time' | 'level'>('time');
@@ -83,7 +98,9 @@ export default function AlertsPage() {
         type: a.alert_type,
         level: ul,
         time: new Date(a.triggered_at).toLocaleString('zh-CN'),
-        description: `${a.alert_type} · 轨迹 #${a.track_id ?? '—'} · job ${a.job_id ?? '—'}`,
+        description: `${a.alert_type} · 轨迹 #${a.track_id ?? '—'} · job ${a.job_id ?? '—'}${
+          a.ai_combined_score != null ? ` · AI异常分 ${a.ai_combined_score.toFixed(2)}` : ''
+        }`,
         location:
           a.camera_id != null ? `摄像头 ID ${a.camera_id}` : '未绑定摄像头（离线任务）',
         source: a.keyframe_path ? '关键帧已存证' : '无关键帧',
@@ -138,7 +155,7 @@ export default function AlertsPage() {
     <Sidebar currentPath="/alerts">
       <Header
         title="告警中心"
-        subtitle="数据来自 FastAPI · 轨迹预警流水线"
+        subtitle="轨迹规则 + IsolationForest / GRU 自编码器（模型见 models/）"
         statusBadge={
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30">
             <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
@@ -296,7 +313,68 @@ export default function AlertsPage() {
 
                 {isExpanded && (
                   <div className="px-4 pb-4 pt-0 border-t border-slate-700/30">
-                    {alert.keyframeUrl && (
+                    {(alert.raw.ai_combined_score != null ||
+                      alert.raw.ml_scores ||
+                      alert.raw.trajectory_features) && (
+                      <div className="mt-4 space-y-2 text-xs">
+                        <p className="text-slate-500 font-medium">轨迹 AI 分析</p>
+                        {alert.raw.ai_combined_score != null && (
+                          <p className="text-slate-300">
+                            综合异常分（0–1，越高越偏离园区常态）：{' '}
+                            <span className="text-amber-400 font-mono">
+                              {alert.raw.ai_combined_score.toFixed(3)}
+                            </span>
+                          </p>
+                        )}
+                        {alert.raw.trajectory_features && (
+                          <pre className="p-3 rounded-xl bg-slate-900/80 border border-slate-700/50 text-slate-400 overflow-x-auto max-h-32">
+                            {JSON.stringify(alert.raw.trajectory_features, null, 2)}
+                          </pre>
+                        )}
+                        {alert.raw.ml_scores && (
+                          <pre className="p-3 rounded-xl bg-slate-900/80 border border-slate-700/50 text-slate-400 overflow-x-auto max-h-40">
+                            {JSON.stringify(alert.raw.ml_scores, null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+                    {trajData && expandedAlert === alert.id && (
+                      <div className="mt-4 space-y-3">
+                        <p className="text-xs text-slate-500 font-medium">轨迹叙事（2D 路径 · 坐标与视频分辨率一致）</p>
+                        <p className="text-sm text-slate-300 leading-relaxed">{trajData.narrative}</p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                          {alert.keyframeUrl && (
+                            <div>
+                              <p className="text-xs text-slate-500 mb-1">关键帧</p>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={alert.keyframeUrl}
+                                alt="keyframe"
+                                className="w-full max-h-48 rounded-xl border border-slate-700/50 object-contain bg-black/40"
+                              />
+                            </div>
+                          )}
+                          <div className="w-full">
+                            <p className="text-xs text-slate-500 mb-1">
+                              轨迹折线（viewBox {trajData.frame_width}×{trajData.frame_height}）
+                            </p>
+                            <svg
+                              viewBox={`0 0 ${trajData.frame_width} ${trajData.frame_height}`}
+                              className="w-full h-48 rounded-xl bg-slate-900/90 border border-cyan-500/20"
+                              preserveAspectRatio="xMidYMid meet"
+                            >
+                              <polyline
+                                fill="none"
+                                stroke="rgb(34,211,238)"
+                                strokeWidth={Math.max(2, trajData.frame_width / 200)}
+                                points={trajData.points.map((p) => `${p.cx},${p.cy}`).join(' ')}
+                              />
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {alert.keyframeUrl && expandedAlert === alert.id && !trajData && (
                       <div className="mt-4">
                         <p className="text-xs text-slate-500 mb-2">关键帧</p>
                         {/* eslint-disable-next-line @next/next/no-img-element */}

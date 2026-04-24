@@ -35,6 +35,18 @@ def get_or_create_system_config(db: Session) -> SystemConfig:
         feedback_window_n=20,
         high_fp_threshold=0.4,
         max_consecutive_frames=12,
+        ml_enabled=True,
+        ml_iforest_min_anomaly_01=0.55,
+        ml_gru_min_anomaly_01=0.5,
+        ml_emit_separate_alerts=True,
+        active_model_version=None,
+        retrain_on_feedback=False,
+        retrain_feedback_delay_sec=10,
+        retrain_interval_hours=0,
+        last_scheduled_train_at=None,
+        holdout_job_fraction=0.2,
+        rtsp_max_workers=4,
+        stream_alert_merge_sec=45.0,
         updated_at=_utcnow(),
     )
     db.add(row)
@@ -158,11 +170,17 @@ def recalc_after_feedback(db: Session) -> None:
         )
         return
     row.consecutive_frames_for_escalation = new_m
+    # 统一策略：同步略抬 ML 告警阈值，减少误报（与规则 M 同向）
+    ifi = float(getattr(row, "ml_iforest_min_anomaly_01", 0.55))
+    gru = float(getattr(row, "ml_gru_min_anomaly_01", 0.5))
+    row.ml_iforest_min_anomaly_01 = min(0.95, round(ifi + 0.03, 3))
+    row.ml_gru_min_anomaly_01 = min(0.95, round(gru + 0.03, 3))
     row.updated_at = _utcnow()
     db.commit()
     print(
         f"[system_config] auto-tune: rolling_fp_rate={rate} (fp={fp_count}/{len(recent)}) "
-        f"=> consecutive_frames {old_m} -> {new_m}"
+        f"=> consecutive_frames {old_m} -> {new_m}, "
+        f"ml_if_th={row.ml_iforest_min_anomaly_01}, ml_gru_th={row.ml_gru_min_anomaly_01}"
     )
 
 
@@ -174,6 +192,10 @@ def reset_system_config_from_yaml(db: Session) -> SystemConfig:
     row.dwell_alert_sec = base.dwell_alert_sec
     row.cooldown_sec = base.cooldown_sec
     row.reversal_alert_k = base.reversal_alert_k
+    row.ml_iforest_min_anomaly_01 = 0.55
+    row.ml_gru_min_anomaly_01 = 0.5
+    row.ml_enabled = True
+    row.ml_emit_separate_alerts = True
     row.updated_at = _utcnow()
     db.commit()
     db.refresh(row)

@@ -11,8 +11,8 @@ from sqlalchemy.types import Date
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import Alert, AnalysisJob, Camera, Feedback, FeedbackLabel, JobStatus, User
-from app.schemas import DashboardSummary, DayCount
+from app.models import Alert, AnalysisJob, Camera, EvaluationReport, Feedback, FeedbackLabel, JobStatus, User
+from app.schemas import DashboardSummary, DayCount, EvaluationReportOut
 
 router = APIRouter()
 
@@ -70,3 +70,40 @@ def dashboard_summary(
         cameras_count=cameras_count,
         recent_jobs_count=recent_jobs_count,
     )
+
+
+@router.get("/metrics")
+def dashboard_metrics(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    """Holdout 评测历史 + 按摄像头/离线桶告警计数（可度量降误报）。"""
+    latest = db.query(EvaluationReport).order_by(EvaluationReport.created_at.desc()).first()
+    hist = (
+        db.query(EvaluationReport)
+        .order_by(EvaluationReport.created_at.desc())
+        .limit(14)
+        .all()
+    )
+    rows_cam = (
+        db.query(Alert.camera_id, func.count(Alert.id))
+        .group_by(Alert.camera_id)
+        .all()
+    )
+    by_cam = {f"camera_{cid}" if cid is not None else "offline_job": int(c) for cid, c in rows_cam}
+    return {
+        "latest_evaluation": EvaluationReportOut.model_validate(latest).model_dump()
+        if latest
+        else None,
+        "evaluation_history": [
+            {
+                "id": e.id,
+                "created_at": e.created_at.isoformat(),
+                "fpr_feedback_approx": e.report_json.get("fpr_feedback_approx"),
+                "alerts_total": e.report_json.get("alerts_total"),
+                "by_camera_bucket": e.report_json.get("by_camera_bucket"),
+            }
+            for e in reversed(hist)
+        ],
+        "alerts_all_time_by_camera_bucket": by_cam,
+    }

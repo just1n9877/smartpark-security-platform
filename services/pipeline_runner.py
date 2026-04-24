@@ -23,9 +23,20 @@ if str(_ROOT / "backend") not in sys.path:
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, ensure_sqlite_migrations
+from app.model_registry import sync_active_version_from_db
 from app.models import Alert, AnalysisJob, JobStatus, TrajectoryPoint, TrajectorySummary
 from app.system_config_service import effective_config_for_pipeline
+from app.unified_policy import combine_rule_and_ml_risk
+from ml.inference import default_seq_len_for_gru, score_trajectory
+from ml.sequence import points_to_sequence
 from services.alert_engine import AlertEngine
+from services.ml_scoring import (
+    any_model_loaded,
+    combined_anomaly_01,
+    load_ml_inference_config,
+    should_emit_gru_alert,
+    should_emit_iforest_alert,
+)
 from services.pipeline_config import load_pipeline_config
 from services.tracking_pipeline import TrackingPipeline
 from services.trajectory_analytics import compute_trajectory_features, denormalize_rect, point_in_rect
@@ -33,6 +44,19 @@ from services.trajectory_analytics import compute_trajectory_features, denormali
 
 def _session() -> Session:
     return SessionLocal()
+
+
+def _ml_alert_exists(db: Session, job_id: int, track_id: int, alert_type: str) -> bool:
+    return (
+        db.query(Alert)
+        .filter(
+            Alert.job_id == job_id,
+            Alert.track_id == track_id,
+            Alert.alert_type == alert_type,
+        )
+        .first()
+        is not None
+    )
 
 
 def run_pipeline_for_job(
@@ -55,6 +79,7 @@ def run_pipeline_for_job(
         job.status = JobStatus.running
         job.error_message = None
         db.commit()
+        sync_active_version_from_db(db)
 
         if config_path is not None:
             cfg = load_pipeline_config(config_path, _ROOT)
@@ -85,6 +110,9 @@ def run_pipeline_for_job(
             fps = 25.0
         fw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         fh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        job.frame_width = fw
+        job.frame_height = fh
+        db.commit()
 
         track_pipe = TrackingPipeline(
             weights=cfg.weights,
@@ -173,6 +201,70 @@ def run_pipeline_for_job(
                 )
             )
         db.commit()
+
+        ml_cfg = load_ml_inference_config(db)
+        if ml_cfg.get("enabled", True) and any_model_loaded():
+            seq_len = default_seq_len_for_gru()
+            summaries_rows = (
+                db.query(TrajectorySummary).filter(TrajectorySummary.job_id == job_id).all()
+            )
+            emit_sep = ml_cfg.get("emit_separate_alerts", True)
+            for s in summaries_rows:
+                pts = points_by_track.get(s.track_id, [])
+                seq = points_to_sequence(pts, fw, fh, seq_len=seq_len)
+                ml_blob = score_trajectory(s.features_json, seq)
+                tr_alerts = (
+                    db.query(Alert)
+                    .filter(Alert.job_id == job_id, Alert.track_id == s.track_id)
+                    .all()
+                )
+                rule_lv = None
+                if tr_alerts:
+                    prio = {"alert": 3, "warning": 2, "info": 1, "low": 0}
+
+                    def _pk(a: Alert) -> int:
+                        return prio.get((a.level or "").lower(), 0)
+
+                    rule_lv = max(tr_alerts, key=_pk).level
+                comb, hint = combine_rule_and_ml_risk(
+                    rule_level=rule_lv,
+                    ml_anomaly_max=combined_anomaly_01(ml_blob),
+                )
+                ml_blob["policy"] = {"combined_risk_01": comb, "narrative_hint": hint}
+                s.ml_scores_json = ml_blob
+                if not emit_sep:
+                    continue
+                if should_emit_iforest_alert(ml_blob, ml_cfg) and not _ml_alert_exists(
+                    db, job_id, s.track_id, "trajectory_ml_iforest"
+                ):
+                    db.add(
+                        Alert(
+                            job_id=job_id,
+                            level="warning",
+                            alert_type="trajectory_ml_iforest",
+                            triggered_at=datetime.now(timezone.utc),
+                            track_id=s.track_id,
+                            camera_id=None,
+                            keyframe_path=None,
+                            is_confirmed=False,
+                        )
+                    )
+                if should_emit_gru_alert(ml_blob, ml_cfg) and not _ml_alert_exists(
+                    db, job_id, s.track_id, "trajectory_ml_gru"
+                ):
+                    db.add(
+                        Alert(
+                            job_id=job_id,
+                            level="warning",
+                            alert_type="trajectory_ml_gru",
+                            triggered_at=datetime.now(timezone.utc),
+                            track_id=s.track_id,
+                            camera_id=None,
+                            keyframe_path=None,
+                            is_confirmed=False,
+                        )
+                    )
+            db.commit()
 
         job.status = JobStatus.completed
         job.error_message = None

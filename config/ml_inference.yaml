@@ -1,0 +1,16 @@
+# 轨迹 ML/DL 推理与「规则 OR 模型」组合告警（与 pipeline_alerts.yaml 独立）
+enabled: true
+
+# IsolationForest：sklearn score_samples 越高越像正常；我们写入 anomaly_01 = 1 - 归一化(score_samples)
+iforest:
+  alert_if_outlier: true
+  # 仅当 sklearn predict == -1（离群）时升成告警
+  min_anomaly_01_for_alert: 0.55
+
+gru_ae:
+  # 重构 MSE 超过训练集分位数阈值则视为异常（推理时在 manifest 中带 gru_mse_p95）
+  alert_if_above_p95: true
+  min_anomaly_01_for_alert: 0.5
+
+# 与规则告警独立：模型单独升一条 trajectory_ml_anomaly / trajectory_ml_gru（便于统计）
+emit_separate_alerts: true

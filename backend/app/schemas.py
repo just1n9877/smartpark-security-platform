@@ -100,6 +100,11 @@ class AlertOut(BaseModel):
     camera_id: int | None
     keyframe_path: str | None
     is_confirmed: bool
+    trajectory_features: dict[str, Any] | None = None
+    ml_scores: dict[str, Any] | None = None
+    ai_combined_score: float | None = Field(
+        None, description="轨迹 ML+DL 综合异常分 0–1，高=更偏离园区正常模式"
+    )
 
     model_config = {"from_attributes": True}
 
@@ -188,11 +193,28 @@ class FeedbackRollupOut(BaseModel):
     by_camera: list[CameraFeedbackRollup]
 
 
+class UnifiedMlPolicyOut(BaseModel):
+    """规则 + ML 统一策略（DB 为权威源）。"""
+
+    ml_enabled: bool
+    ml_iforest_min_anomaly_01: float
+    ml_gru_min_anomaly_01: float
+    ml_emit_separate_alerts: bool
+    active_model_version: str | None = None
+    retrain_on_feedback: bool
+    retrain_feedback_delay_sec: int
+    retrain_interval_hours: int
+    holdout_job_fraction: float
+    rtsp_max_workers: int
+    stream_alert_merge_sec: float
+
+
 class SettingsOut(BaseModel):
     effective: PipelineSettingsBlock
     yaml_baseline: PipelineSettingsBlock
     tuning: TuningParamsOut
     feedback_rollup: FeedbackRollupOut
+    unified_ml: UnifiedMlPolicyOut
 
 
 class SettingsPatch(BaseModel):
@@ -207,3 +229,56 @@ class SettingsPatch(BaseModel):
     feedback_window_n: int | None = Field(default=None, ge=5, le=500)
     high_fp_threshold: float | None = Field(default=None, ge=0.05, le=0.95)
     max_consecutive_frames: int | None = Field(default=None, ge=3, le=30)
+    ml_enabled: bool | None = None
+    ml_iforest_min_anomaly_01: float | None = Field(default=None, ge=0.05, le=0.99)
+    ml_gru_min_anomaly_01: float | None = Field(default=None, ge=0.05, le=0.99)
+    ml_emit_separate_alerts: bool | None = None
+    retrain_on_feedback: bool | None = None
+    retrain_feedback_delay_sec: int | None = Field(default=None, ge=0, le=86400)
+    retrain_interval_hours: int | None = Field(default=None, ge=0, le=168)
+    holdout_job_fraction: float | None = Field(default=None, ge=0.05, le=0.5)
+    rtsp_max_workers: int | None = Field(default=None, ge=1, le=32)
+    stream_alert_merge_sec: float | None = Field(default=None, ge=5, le=600)
+
+
+class TrainingRunOut(BaseModel):
+    id: int
+    status: str
+    trigger: str
+    version_id: str | None = None
+    message: str | None = None
+    meta_json: dict[str, Any] | None = None
+    created_at: UtcIsoZ
+    finished_at: UtcIsoZ | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class EvaluationReportOut(BaseModel):
+    id: int
+    report_json: dict[str, Any]
+    note: str | None = None
+    created_at: UtcIsoZ
+
+    model_config = {"from_attributes": True}
+
+
+class TrajectoryPoint2D(BaseModel):
+    frame_idx: int
+    cx: float
+    cy: float
+
+
+class AlertTrajectoryOut(BaseModel):
+    alert_id: int
+    job_id: int | None = None
+    track_id: int | None = None
+    frame_width: int
+    frame_height: int
+    points: list[TrajectoryPoint2D]
+    narrative: str
+    alert_type: str | None = None
+
+
+class ActivateModelBody(BaseModel):
+    version_id: str = Field(..., min_length=2, max_length=64)

@@ -83,6 +83,12 @@ export type ApiAlert = {
   camera_id: number | null;
   keyframe_path: string | null;
   is_confirmed: boolean;
+  /** 轨迹统计特征（与流水线 trajectory_analytics 一致） */
+  trajectory_features?: Record<string, number> | null;
+  /** IsolationForest + GRU-AE 推理结果 */
+  ml_scores?: Record<string, unknown> | null;
+  /** 0–1，综合异常分（取子模型 anomaly_01 最大者） */
+  ai_combined_score?: number | null;
 };
 
 export type DashboardSummary = {
@@ -93,6 +99,34 @@ export type DashboardSummary = {
   jobs_by_status: Record<string, number>;
   cameras_count: number;
   recent_jobs_count: number;
+};
+
+export type DashboardMetrics = {
+  latest_evaluation: {
+    id: number;
+    report_json: Record<string, unknown>;
+    note: string | null;
+    created_at: string;
+  } | null;
+  evaluation_history: {
+    id: number;
+    created_at: string;
+    fpr_feedback_approx: number | null | undefined;
+    alerts_total: number | null | undefined;
+    by_camera_bucket: Record<string, number> | null | undefined;
+  }[];
+  alerts_all_time_by_camera_bucket: Record<string, number>;
+};
+
+export type AlertTrajectory = {
+  alert_id: number;
+  job_id: number | null;
+  track_id: number | null;
+  frame_width: number;
+  frame_height: number;
+  points: { frame_idx: number; cx: number; cy: number }[];
+  narrative: string;
+  alert_type: string | null;
 };
 
 export type ApiCamera = {
@@ -139,6 +173,20 @@ export type CameraFeedbackRollup = {
   false_positive_rate: number | null;
 };
 
+export type UnifiedMlPolicyOut = {
+  ml_enabled: boolean;
+  ml_iforest_min_anomaly_01: number;
+  ml_gru_min_anomaly_01: number;
+  ml_emit_separate_alerts: boolean;
+  active_model_version: string | null;
+  retrain_on_feedback: boolean;
+  retrain_feedback_delay_sec: number;
+  retrain_interval_hours: number;
+  holdout_job_fraction: number;
+  rtsp_max_workers: number;
+  stream_alert_merge_sec: number;
+};
+
 export type SettingsOut = {
   effective: PipelineSettingsBlock;
   yaml_baseline: PipelineSettingsBlock;
@@ -153,6 +201,7 @@ export type SettingsOut = {
     global: FeedbackRollupStats;
     by_camera: CameraFeedbackRollup[];
   };
+  unified_ml?: UnifiedMlPolicyOut;
 };
 
 export type SettingsPatch = {
@@ -165,6 +214,16 @@ export type SettingsPatch = {
   feedback_window_n?: number;
   high_fp_threshold?: number;
   max_consecutive_frames?: number;
+  ml_enabled?: boolean;
+  ml_iforest_min_anomaly_01?: number;
+  ml_gru_min_anomaly_01?: number;
+  ml_emit_separate_alerts?: boolean;
+  retrain_on_feedback?: boolean;
+  retrain_feedback_delay_sec?: number;
+  retrain_interval_hours?: number;
+  holdout_job_fraction?: number;
+  rtsp_max_workers?: number;
+  stream_alert_merge_sec?: number;
 };
 
 export async function fetchMe(): Promise<UserPublic> {
@@ -180,4 +239,12 @@ export async function patchSettings(body: SettingsPatch): Promise<SettingsOut> {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
+}
+
+export async function fetchDashboardMetrics(): Promise<DashboardMetrics> {
+  return apiFetch<DashboardMetrics>('/dashboard/metrics');
+}
+
+export async function fetchAlertTrajectory(alertId: number): Promise<AlertTrajectory> {
+  return apiFetch<AlertTrajectory>(`/alerts/${alertId}/trajectory`);
 }

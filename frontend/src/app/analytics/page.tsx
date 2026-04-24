@@ -7,16 +7,26 @@ import {
   AlertTriangle, Camera, Shield, Activity, Loader2,
 } from 'lucide-react';
 import { Sidebar, Header } from '@/components/Sidebar';
-import { apiFetch, type ApiAlert, type DashboardSummary } from '@/lib/api';
+import {
+  apiFetch,
+  fetchDashboardMetrics,
+  type ApiAlert,
+  type DashboardMetrics,
+  type DashboardSummary,
+} from '@/lib/api';
 
 const summaryFetcher = () => apiFetch<DashboardSummary>('/dashboard/summary');
 const alertsFetcher = () => apiFetch<ApiAlert[]>('/alerts?limit=500');
+const metricsFetcher = () => fetchDashboardMetrics();
 
 export default function AnalyticsPage() {
   const { data: summary, isLoading: sLoad } = useSWR('analytics-summary', summaryFetcher, {
     refreshInterval: 15000,
   });
   const { data: alerts, isLoading: aLoad } = useSWR('analytics-alerts-types', alertsFetcher);
+  const { data: metrics, isLoading: mLoad } = useSWR<DashboardMetrics>('analytics-metrics', metricsFetcher, {
+    refreshInterval: 30000,
+  });
 
   const [selectedArea, setSelectedArea] = useState('all');
 
@@ -92,6 +102,7 @@ export default function AnalyticsPage() {
   }, [summary]);
 
   const loading = (sLoad && !summary) || (aLoad && !alerts);
+  const latestFpr = metrics?.latest_evaluation?.report_json?.fpr_feedback_approx;
 
   return (
     <Sidebar currentPath="/analytics">
@@ -130,6 +141,61 @@ export default function AnalyticsPage() {
             加载统计数据…
           </div>
         )}
+
+        <div className="dashboard-card rounded-2xl p-5 mb-6 border border-cyan-500/20">
+          <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
+            <Shield className="w-5 h-5 text-cyan-400" />
+            Holdout 评测与分桶（GET /dashboard/metrics）
+          </h3>
+          {mLoad && !metrics ? (
+            <p className="text-slate-500 text-sm">加载指标…</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-slate-400 mb-1">最新评测 FPR（反馈误报近似）</p>
+                <p className="text-2xl font-mono text-amber-300">
+                  {latestFpr != null ? `${(Number(latestFpr) * 100).toFixed(2)}%` : '—（admin 执行 POST /admin/evaluation/run）'}
+                </p>
+                {metrics?.latest_evaluation?.created_at && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    时间 {new Date(metrics.latest_evaluation.created_at).toLocaleString('zh-CN')}
+                  </p>
+                )}
+              </div>
+              <div>
+                <p className="text-slate-400 mb-2">历史 FPR 曲线（评测次数）</p>
+                <div className="flex items-end gap-1 h-24">
+                  {(metrics?.evaluation_history ?? []).map((h, i) => {
+                    const v = h.fpr_feedback_approx != null ? Number(h.fpr_feedback_approx) : 0;
+                    const pct = Math.min(100, v * 100 * 2);
+                    return (
+                      <div key={h.id} className="flex-1 flex flex-col items-center gap-1" title={`id ${h.id}`}>
+                        <div
+                          className="w-full bg-cyan-500/40 rounded-t min-h-[4px]"
+                          style={{ height: `${Math.max(pct, 4)}%` }}
+                        />
+                        <span className="text-[10px] text-slate-600">{i + 1}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="md:col-span-2">
+                <p className="text-slate-400 mb-2">全量告警按摄像头 / 离线任务桶</p>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(metrics?.alerts_all_time_by_camera_bucket ?? {}).map(([k, v]) => (
+                    <span
+                      key={k}
+                      className="px-2 py-1 rounded-lg bg-slate-800/80 text-slate-300 text-xs border border-slate-700/50"
+                    >
+                      {k}: {v}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {statisticsCards.map((stat, index) => {

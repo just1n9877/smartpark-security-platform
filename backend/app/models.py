@@ -21,6 +21,13 @@ class JobStatus(str, enum.Enum):
     failed = "failed"
 
 
+class TrainingRunStatus(str, enum.Enum):
+    pending = "pending"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+
+
 class FeedbackLabel(str, enum.Enum):
     false_positive = "false_positive"
     delivery = "delivery"
@@ -65,6 +72,8 @@ class AnalysisJob(Base):
     video_path: Mapped[str] = mapped_column(String(1024))
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus, native_enum=False), default=JobStatus.pending)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    frame_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    frame_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
@@ -101,6 +110,7 @@ class TrajectorySummary(Base):
     job_id: Mapped[int] = mapped_column(ForeignKey("analysis_jobs.id", ondelete="CASCADE"), index=True)
     track_id: Mapped[int] = mapped_column(Integer, index=True)
     features_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    ml_scores_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     job: Mapped[AnalysisJob] = relationship("AnalysisJob", back_populates="trajectory_summaries")
 
@@ -126,7 +136,7 @@ class Alert(Base):
 
 
 class SystemConfig(Base):
-    """单例行 id=1：流水线去抖/预警阈值（可由反馈统计自动收紧，或 admin 重置为 YAML 基准）。"""
+    """单例行 id=1：流水线 + ML 阈值统一存 DB（YAML 仅作基准）；模型版本指针。"""
 
     __tablename__ = "system_configs"
 
@@ -139,7 +149,48 @@ class SystemConfig(Base):
     feedback_window_n: Mapped[int] = mapped_column(Integer, default=20)
     high_fp_threshold: Mapped[float] = mapped_column(Float, default=0.4)
     max_consecutive_frames: Mapped[int] = mapped_column(Integer, default=12)
+    # 统一策略：ML 与规则共用「敏感度」思想——误报高时同步抬升 M 与 ML 告警阈值
+    ml_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    ml_iforest_min_anomaly_01: Mapped[float] = mapped_column(Float, default=0.55)
+    ml_gru_min_anomaly_01: Mapped[float] = mapped_column(Float, default=0.5)
+    ml_emit_separate_alerts: Mapped[bool] = mapped_column(Boolean, default=True)
+    active_model_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    retrain_on_feedback: Mapped[bool] = mapped_column(Boolean, default=False)
+    retrain_feedback_delay_sec: Mapped[int] = mapped_column(Integer, default=10)
+    retrain_interval_hours: Mapped[int] = mapped_column(Integer, default=0)
+    last_scheduled_train_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    holdout_job_fraction: Mapped[float] = mapped_column(Float, default=0.2)
+    rtsp_max_workers: Mapped[int] = mapped_column(Integer, default=4)
+    stream_alert_merge_sec: Mapped[float] = mapped_column(Float, default=45.0)
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class TrainingRun(Base):
+    __tablename__ = "training_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    status: Mapped[TrainingRunStatus] = mapped_column(
+        Enum(TrainingRunStatus, native_enum=False), default=TrainingRunStatus.pending
+    )
+    trigger: Mapped[str] = mapped_column(String(32), default="manual")
+    version_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    meta_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class EvaluationReport(Base):
+    __tablename__ = "evaluation_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    report_json: Mapped[dict] = mapped_column(JSON)
+    note: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
 

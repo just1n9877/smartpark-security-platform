@@ -178,3 +178,27 @@ curl -s http://127.0.0.1:8000/dashboard/summary -H "Authorization: Bearer $TOKEN
 - Docker 内找不到视频：确认文件在 `./data/videos/`，请求体用 `/app/data/videos/文件名.mp4`
 - 第一次 YOLO 很慢：首次会下载权重，后续由 `ultralytics-cache` 复用
 - 跨域报错：后端已放行常见本地端口；如果改了前端端口，需要同步更新 `backend/app/main.py` 的 `allow_origins`
+
+---
+
+七、模型版本 / 重训 / Holdout / RTSP（扩展验收）
+
+前置：`TOKEN` 为 admin 的 Bearer。
+
+1) **统一策略**：`GET /settings` 应含 `unified_ml`（ML 阈值与规则同库）；`PATCH /settings` 可改 `retrain_on_feedback`、`retrain_interval_hours` 等。
+
+2) **手动训练**：`POST /admin/training/enqueue`，然后 `GET /admin/training/runs` 观察 `status` 变为 `completed` 且 `version_id` 非空；`models/versions/<version_id>/` 下应有 `manifest.json`。
+
+3) **回滚**：`POST /admin/models/activate`，body `{"version_id":"v..."}`，再跑一条视频任务，告警详情中 ML 分数应与回滚前版本一致（需重启进程则见 README）。
+
+4) **Holdout 评测**：`POST /admin/evaluation/run`，响应写入 `evaluation_reports`；前端「数据分析」页「Holdout 评测」卡片应出现 FPR；`GET /dashboard/metrics` 返回 `latest_evaluation`。
+
+5) **误报触发重训**：在 `PATCH /settings` 打开 `retrain_on_feedback: true` 后，对某告警提交 `false_positive` 反馈；`retrain_feedback_delay_sec` 秒后 `GET /admin/training/runs` 应出现 `trigger=feedback` 的新记录。
+
+6) **定时重训**：`retrain_interval_hours` 设为 `1`（测试后改回 `0`），等待约 1 小时或临时改代码缩短轮询（生产勿改）；日志中应出现 `trigger=schedule`。
+
+7) **RTSP**：在 `cameras` 表为某摄像头配置 `rtsp_url` 后，`POST /admin/streams/{camera_id}/start`；设置环境变量 `STREAM_DEMO_MAX_FRAMES=500` 可缩短演示；`GET /admin/streams/active` 查看活跃路数；`POST .../stop` 停止。
+
+8) **流式去重单测**（项目根）：`py -3 tests/test_stream_dedupe.py -v`
+
+9) **轨迹可视化**：登录前端「告警中心」，展开任意带 `job_id` 的告警，应看到叙事文案 + 2D 折线图；纯 RTSP 告警可能无轨迹点，仅叙事说明。

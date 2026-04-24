@@ -93,27 +93,51 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `DATABASE_URL` | 覆盖默认 SQLite 路径 |
 | `JWT_SECRET` | JWT 签名密钥（生产必须修改） |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | 令牌有效期（默认 1440） |
+| `CORS_ORIGINS` | 额外允许的浏览器 Origin（逗号分隔），与默认本地端口合并 |
 | `DATASET_VIDEO_ROOT` | 批处理视频根目录 |
+| `STREAM_DEMO_MAX_FRAMES` | RTSP 演示最大帧数，`0` 表示不限制 |
 
 ---
 
-八、数据库说明
+八、Admin API（需 admin 角色）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/admin/training/runs` | 训练任务列表 |
+| POST | `/admin/training/enqueue` | 入队全量训练（IF + GRU-AE + 多类头） |
+| GET | `/admin/models/versions` | 已存在的 `models/versions/*` |
+| POST | `/admin/models/activate` | body `{"version_id":"v..."}` 回滚/切换 |
+| POST | `/admin/evaluation/run` | Holdout 评测并落库 |
+| GET | `/admin/evaluation/latest` | 最近评测报告 |
+| POST | `/admin/streams/{camera_id}/start` | 启动 RTSP worker（需 `Camera.rtsp_url`） |
+| POST | `/admin/streams/{camera_id}/stop` | 停止 |
+| GET | `/admin/streams/active` | 当前活跃流 |
+
+公开（已登录）：`GET /dashboard/metrics`（评测历史 + 分桶告警）、`GET /alerts/{id}/trajectory`（轨迹叙事与点列）。
+
+ML 阈值与规则去抖参数均在 `GET/PATCH /settings` 的 `unified_ml` / `effective` 中统一维护。
+
+---
+
+九、数据库说明
 
 首次启动会自动 `create_all` 建表。若旧库缺少 `alerts.job_id` 列，系统会在启动时尝试 `ALTER TABLE` 补列。目前还没接入 Alembic 迁移。
 
 ---
 
-九、核心 API
+十、核心 API
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/auth/me` | 当前用户信息 |
 | GET | `/alerts` | 告警列表（支持 `level`、`skip`、`limit`） |
 | GET | `/alerts/{id}` | 告警详情 |
+| GET | `/alerts/{id}/trajectory` | 轨迹点 + 叙事文案 |
 | POST | `/alerts/{id}/feedback` | 提交反馈并异步更新误报统计 |
 | GET | `/settings` | 查看当前生效阈值与误报统计 |
 | PATCH | `/settings` | admin 修改阈值或恢复 YAML 默认值 |
 | GET | `/dashboard/summary` | 大屏统计汇总 |
+| GET | `/dashboard/metrics` | Holdout 评测历史与分桶告警 |
 | GET | `/jobs` | 最近任务列表 |
 | GET | `/jobs/{job_id}` | 任务详情、轨迹点和告警计数 |
 | POST | `/jobs/run_local_path` | 异步分析本地视频并返回 `job_id` |
@@ -122,7 +146,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ---
 
-十、常用命令
+十一、常用命令
 
 1) curl 测试（bash）
 
@@ -148,7 +172,7 @@ python scripts/batch_extract_trajectories.py --root D:\path\to\mp4\folder
 
 ---
 
-十一、阶段2自检建议
+十二、阶段2自检建议
 
 - 至少跑通 1 个含行人视频，`TrajectoryPoint` 数量大于 0
 - `TrajectorySummary` 正常写入，宽松阈值下可触发告警
@@ -158,7 +182,7 @@ python scripts/batch_extract_trajectories.py --root D:\path\to\mp4\folder
 
 ---
 
-十二、相关文档
+十三、相关文档
 
 - 项目总览：`README.md`
 - 前端说明：`frontend/README.md`

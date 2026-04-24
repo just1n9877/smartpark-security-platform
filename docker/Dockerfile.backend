@@ -22,11 +22,13 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY backend /app/backend
 COPY services /app/services
+COPY ml /app/ml
 COPY config /app/config
 COPY scripts /app/scripts
 COPY storage /app/storage
+RUN mkdir -p /app/models
 
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app/backend:/app
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app/backend

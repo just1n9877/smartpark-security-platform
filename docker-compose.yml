@@ -4,6 +4,12 @@
 # 持久化：database/、storage/ 挂载到命名卷。
 # 流水线读视频：将 mp4 放到 ./data/videos/（或自定义挂载），请求体 path 使用容器内路径 /app/data/videos/xxx.mp4
 
+# 公网部署示例（宿主机或反代域名）：
+#   export NEXT_PUBLIC_API_BASE_URL=https://api.example.com
+#   export CORS_ORIGINS=https://app.example.com
+#   docker compose up --build
+# 前端构建会把 NEXT_PUBLIC_API_BASE_URL 打进浏览器 bundle，须为浏览器可访问的后端地址（不要用 127.0.0.1）。
+
 services:
   backend:
     build:
@@ -14,19 +20,21 @@ services:
     environment:
       DATABASE_URL: sqlite:////app/database/app.db
       JWT_SECRET: ${JWT_SECRET:-docker-dev-change-me}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
     volumes:
       - smartguard-database:/app/database
       - smartguard-storage:/app/storage
       - ultralytics-cache:/root/.cache
       - ./config:/app/config:ro
       - ./data:/app/data:ro
+      - ./models:/app/models
 
   frontend:
     build:
       context: ./frontend
       dockerfile: ../docker/Dockerfile.frontend
       args:
-        NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8000
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://127.0.0.1:8000}
     ports:
       - "3000:3000"
     depends_on:

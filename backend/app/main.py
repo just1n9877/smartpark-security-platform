@@ -8,6 +8,7 @@ import app.models  # noqa: F401 — register ORM tables on Base.metadata
 from app.config import settings
 from app.database import Base, SessionLocal, engine, ensure_sqlite_migrations
 from app.routers import (
+    admin_routes,
     alerts_routes,
     auth_routes,
     cameras_routes,
@@ -15,6 +16,8 @@ from app.routers import (
     jobs_routes,
     settings_routes,
 )
+from app.model_registry import sync_active_version_from_db
+from app.retrain_scheduler import spawn_retrain_scheduler
 from app.seed import seed_users_if_empty
 
 
@@ -25,8 +28,10 @@ async def lifespan(_: FastAPI):
     db = SessionLocal()
     try:
         seed_users_if_empty(db)
+        sync_active_version_from_db(db)
     finally:
         db.close()
+    spawn_retrain_scheduler()
     yield
 
 
@@ -43,21 +48,11 @@ app.include_router(cameras_routes.router, prefix="/cameras", tags=["cameras"])
 app.include_router(jobs_routes.router, prefix="/jobs", tags=["jobs"])
 app.include_router(dashboard_routes.router, prefix="/dashboard", tags=["dashboard"])
 app.include_router(settings_routes.router, prefix="/settings", tags=["settings"])
+app.include_router(admin_routes.router, prefix="/admin", tags=["admin"])
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:4173",
-        "http://127.0.0.1:4173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-        "http://localhost:5000",
-        "http://127.0.0.1:5000",
-    ],
+    allow_origins=settings.cors_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
