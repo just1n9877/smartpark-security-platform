@@ -1,13 +1,16 @@
 import { useState } from 'react';
 import useSWR, { SWRConfiguration, Key } from 'swr';
 
+type FetchError = Error & { status?: number };
+type JsonObject = Record<string, unknown>;
+
 // 统一的 fetcher
 const fetcher = async (url: string) => {
   const res = await fetch(url);
   
   if (!res.ok) {
-    const error = new Error('An error occurred while fetching the data.');
-    (error as any).status = res.status;
+    const error: FetchError = new Error('An error occurred while fetching the data.');
+    error.status = res.status;
     throw error;
   }
   
@@ -15,7 +18,7 @@ const fetcher = async (url: string) => {
 };
 
 // 基础 SWR Hook
-export function useFetch<T = any>(
+export function useFetch<T = unknown>(
   key: Key,
   options?: SWRConfiguration<T>
 ) {
@@ -27,7 +30,7 @@ export function useFetch<T = any>(
 }
 
 // 实时数据 SWR Hook（自动轮询）
-export function useRealtimeData<T = any>(
+export function useRealtimeData<T = unknown>(
   key: Key,
   refreshInterval = 5000,
   options?: SWRConfiguration<T>
@@ -92,7 +95,7 @@ interface PaginationData<T> {
 }
 
 // 分页 Hook
-export function usePaginatedData<T = any>(
+export function usePaginatedData<T = unknown>(
   endpoint: string,
   options?: SWRConfiguration<PaginationData<T>> & { page?: number; limit?: number }
 ) {
@@ -116,7 +119,7 @@ export function usePaginatedData<T = any>(
 }
 
 // 乐观更新 Hook
-export function useOptimisticUpdate<T = any>(key: Key) {
+export function useOptimisticUpdate<T = unknown>(key: Key) {
   const { data, mutate } = useFetch<T>(key);
 
   const optimisticUpdate = async (
@@ -147,7 +150,7 @@ export function useOptimisticUpdate<T = any>(key: Key) {
 }
 
 // 表单提交 Hook
-export function useFormSubmit<T = any>(
+export function useFormSubmit<T = unknown>(
   endpoint: string,
   options?: {
     onSuccess?: (data: T) => void;
@@ -156,7 +159,7 @@ export function useFormSubmit<T = any>(
 ) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const submit = async (formData: Record<string, any>) => {
+  const submit = async (formData: JsonObject) => {
     setIsSubmitting(true);
     
     try {
@@ -172,7 +175,7 @@ export function useFormSubmit<T = any>(
         throw new Error('提交失败');
       }
 
-      const result = await response.json();
+      const result = (await response.json()) as T;
       options?.onSuccess?.(result);
       return result;
     } catch (err) {
@@ -189,24 +192,25 @@ export function useFormSubmit<T = any>(
 
 // 错误处理 Hook
 export function useErrorHandler() {
-  const handleError = (error: any) => {
+  const handleError = (error: unknown) => {
     console.error('Error:', error);
+    const fetchError = error as FetchError;
     
     // 根据错误类型显示不同的消息
-    if (error.status === 401) {
+    if (fetchError.status === 401) {
       // 未授权，跳转登录
       if (typeof window !== 'undefined') {
         window.location.href = '/login';
       }
-    } else if (error.status === 403) {
+    } else if (fetchError.status === 403) {
       // 权限不足
       console.error('权限不足');
-    } else if (error.status === 404) {
+    } else if (fetchError.status === 404) {
       // 资源不存在
       console.error('资源不存在');
     } else {
       // 其他错误
-      console.error(error.message || '发生错误');
+      console.error(fetchError.message || '发生错误');
     }
   };
 

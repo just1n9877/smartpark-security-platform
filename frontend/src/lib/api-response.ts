@@ -2,13 +2,13 @@ import { NextResponse } from 'next/server';
 import { ZodError, ZodSchema } from 'zod';
 
 // 统一 API 响应接口
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: {
     code: string;
     message: string;
-    details?: any;
+    details?: unknown;
   };
   timestamp: number;
   requestId?: string;
@@ -106,7 +106,7 @@ export type ErrorCode = typeof ErrorCodes[keyof typeof ErrorCodes];
 export function errorResponse(
   code: ErrorCode,
   message: string,
-  details?: any,
+  details?: unknown,
   statusCode: number = 400,
   requestId?: string
 ): NextResponse<ApiResponse> {
@@ -126,7 +126,7 @@ export function errorResponse(
 
 // 常用错误响应快捷方法
 export const ApiErrors = {
-  badRequest: (message: string, details?: any) => 
+  badRequest: (message: string, details?: unknown) => 
     errorResponse(ErrorCodes.BAD_REQUEST, message, details, 400),
   
   unauthorized: (message = '未授权访问') => 
@@ -190,7 +190,7 @@ export function validateQuery<T>(
 export function logApiRequest(
   method: string,
   path: string,
-  data?: any,
+  data?: unknown,
   userId?: string
 ) {
   const sanitizedData = sanitizeLogData(data);
@@ -205,23 +205,27 @@ export function logApiRequest(
 export function logApiError(
   method: string,
   path: string,
-  error: any,
+  error: unknown,
   userId?: string
 ) {
+  const err = error instanceof Error ? error : new Error(String(error));
   console.error(`[API ERROR] ${method} ${path}`, {
-    error: error.message || error,
-    stack: error.stack,
+    error: err.message,
+    stack: err.stack,
     userId,
     timestamp: new Date().toISOString(),
   });
 }
 
 // 日志脱敏
-function sanitizeLogData(data: any): any {
-  if (!data) return data;
+function sanitizeLogData(data: unknown): Record<string, unknown> {
+  if (!data) return {};
+  if (typeof data !== 'object' || Array.isArray(data)) {
+    return { value: data };
+  }
   
   const sensitiveFields = ['password', 'token', 'secret', 'apiKey', 'authorization'];
-  const sanitized = { ...data };
+  const sanitized: Record<string, unknown> = { ...(data as Record<string, unknown>) };
   
   for (const field of sensitiveFields) {
     if (sanitized[field]) {

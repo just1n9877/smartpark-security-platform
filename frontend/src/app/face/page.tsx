@@ -49,7 +49,6 @@ export default function FacePage() {
   const { data: identities } = useSWR<TrackIdentity[]>('face-track-identities', fetchTrackIdentities, { refreshInterval: 10000 });
 
   const [showModal, setShowModal] = useState(false);
-  const [selectedPersonId, setSelectedPersonId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [newPerson, setNewPerson] = useState({
