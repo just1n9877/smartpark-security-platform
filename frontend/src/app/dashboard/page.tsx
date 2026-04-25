@@ -5,7 +5,7 @@ import useSWR from 'swr';
 import Link from 'next/link';
 import {
   Camera, AlertTriangle, Users, Activity, Bell, Settings,
-  ChevronRight, Eye, Zap, MapPin, Clock, Fingerprint,
+  ChevronRight, Eye, Zap, MapPin, Clock, Map,
   Grid3X3, List, Check, X, Loader2,
 } from 'lucide-react';
 import { Sidebar, Header, StatCard } from '@/components/Sidebar';
@@ -16,6 +16,10 @@ const alertsFetcher = () => apiFetch<ApiAlert[]>('/alerts?limit=5');
 const camerasFetcher = () => apiFetch<ApiCamera[]>('/cameras');
 
 function uiLevel(raw: string): string {
+  if (raw === 'critical') return 'critical';
+  if (raw === 'high') return 'warning';
+  if (raw === 'medium') return 'medium';
+  if (raw === 'low') return 'low';
   if (raw === 'alert') return 'critical';
   if (raw === 'warning') return 'warning';
   return raw;
@@ -25,6 +29,8 @@ function levelStyle(level: string) {
   const colors: Record<string, string> = {
     critical: 'text-red-400 bg-red-500/10 border-red-500/30',
     warning: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+    medium: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30',
+    low: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
     alert: 'text-red-400 bg-red-500/10 border-red-500/30',
   };
   return colors[level] || 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30';
@@ -273,14 +279,14 @@ export default function DashboardPage() {
                 </div>
                 <span className="text-sm font-medium text-white">数据分析</span>
               </Link>
-              <div className="p-4 rounded-xl bg-slate-800/30 border border-dashed border-slate-600/50 flex items-center gap-3 opacity-70">
-                <Fingerprint className="w-5 h-5 text-slate-500" />
-                <span className="text-sm text-slate-500">人脸模块（未接后端）</span>
-              </div>
-              <div className="p-4 rounded-xl bg-slate-800/30 border border-dashed border-slate-600/50 flex items-center gap-3 opacity-70">
-                <Settings className="w-5 h-5 text-slate-500" />
-                <span className="text-sm text-slate-500">系统设置（占位）</span>
-              </div>
+              <Link href="/rules" className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:border-emerald-500/40 transition-all flex items-center gap-3">
+                <Map className="w-5 h-5 text-emerald-400" />
+                <span className="text-sm font-medium text-white">场景规则</span>
+              </Link>
+              <Link href="/settings" className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:border-purple-500/40 transition-all flex items-center gap-3">
+                <Settings className="w-5 h-5 text-purple-400" />
+                <span className="text-sm font-medium text-white">系统设置</span>
+              </Link>
             </div>
           </div>
         </div>

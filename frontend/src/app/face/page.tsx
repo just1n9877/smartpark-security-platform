@@ -1,336 +1,267 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import useSWR from 'swr';
+import { Camera, Check, Fingerprint, Loader2, Plus, Shield, Upload, User, UserX, X } from 'lucide-react';
+import { Header, Sidebar } from '@/components/Sidebar';
 import {
-  Search, Plus, Grid3X3, List, User, Users, Clock, MapPin, Camera, Check, X, ChevronRight
-} from 'lucide-react';
-import { Sidebar, Header } from '@/components/Sidebar';
+  createPerson,
+  createPersonAuthorization,
+  evidenceToUrl,
+  fetchCameras,
+  fetchPersons,
+  fetchRecognitionLogs,
+  fetchSceneRules,
+  fetchTrackIdentities,
+  uploadFaceProfile,
+  type ApiCamera,
+  type Person,
+  type RecognitionLog,
+  type SceneRule,
+  type TrackIdentity,
+} from '@/lib/api';
 
-// 人员数据
-const personsData = [
-  { id: 1, name: '张伟', employeeId: 'EMP001', department: '研发部', type: '员工', faceUrl: '', status: 'normal', lastSeen: '2024-04-16 14:30', confidence: 98.5 },
-  { id: 2, name: '李娜', employeeId: 'EMP002', department: '市场部', type: '员工', faceUrl: '', status: 'normal', lastSeen: '2024-04-16 14:25', confidence: 97.8 },
-  { id: 3, name: '王强', employeeId: 'EMP003', department: '安保部', type: '员工', faceUrl: '', status: 'normal', lastSeen: '2024-04-16 14:20', confidence: 99.1 },
-  { id: 4, name: '刘洋', employeeId: 'VIP001', department: '合作方', type: 'VIP', faceUrl: '', status: 'vip', lastSeen: '2024-04-16 13:45', confidence: 96.3 },
-  { id: 5, name: '陈明', employeeId: 'EMP004', department: '人事部', type: '员工', faceUrl: '', status: 'normal', lastSeen: '2024-04-16 12:30', confidence: 98.2 },
-  { id: 6, name: '赵敏', employeeId: 'BLK001', department: '黑名单', type: '黑名单', faceUrl: '', status: 'blacklist', lastSeen: '2024-04-16 10:15', confidence: 94.7 },
-  { id: 7, name: '孙浩', employeeId: 'EMP005', department: '财务部', type: '员工', faceUrl: '', status: 'normal', lastSeen: '2024-04-16 11:20', confidence: 97.5 },
-  { id: 8, name: '周婷', employeeId: 'VIS001', department: '访客', type: '访客', faceUrl: '', status: 'visitor', lastSeen: '2024-04-16 09:30', confidence: 95.8 },
-];
-
-const accessRecords = [
-  { id: 1, name: '张伟', location: '东门入口', time: '2024-04-16 14:30:22', type: '人脸识别', result: '通过' },
-  { id: 2, name: '李娜', location: '1号楼大堂', time: '2024-04-16 14:25:15', type: '人脸识别', result: '通过' },
-  { id: 3, name: '王强', location: '停车场入口', time: '2024-04-16 14:20:08', type: '人脸识别', result: '通过' },
-  { id: 4, name: '赵敏', location: '2号楼入口', time: '2024-04-16 10:15:33', type: '人脸识别', result: '拒绝' },
-  { id: 5, name: '周婷', location: '访客签到', time: '2024-04-16 09:30:00', type: '人脸登记', result: '登记' },
-];
-
-const statusConfig: Record<string, { color: string; bg: string; label: string }> = {
-  normal: { color: 'text-emerald-400', bg: 'bg-emerald-500/10', label: '正常' },
-  vip: { color: 'text-purple-400', bg: 'bg-purple-500/10', label: 'VIP' },
-  visitor: { color: 'text-cyan-400', bg: 'bg-cyan-500/10', label: '访客' },
-  blacklist: { color: 'text-red-400', bg: 'bg-red-500/10', label: '黑名单' },
+const personTypeLabels: Record<string, string> = {
+  employee: '员工',
+  visitor: '访客',
+  contractor: '施工/运维',
+  blacklist: '黑名单',
+  unknown: '未知',
 };
 
-export default function FacePage() {
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [selectedPerson, setSelectedPerson] = useState<typeof personsData[0] | null>(null);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'persons' | 'records'>('persons');
-  const [filterType, setFilterType] = useState<string>('all');
+const personTypeClasses: Record<string, string> = {
+  employee: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30',
+  visitor: 'text-cyan-300 bg-cyan-500/10 border-cyan-500/30',
+  contractor: 'text-amber-300 bg-amber-500/10 border-amber-500/30',
+  blacklist: 'text-red-300 bg-red-500/10 border-red-500/30',
+  unknown: 'text-slate-300 bg-slate-500/10 border-slate-500/30',
+};
 
-  const filteredPersons = personsData.filter(p => 
-    filterType === 'all' || p.type === filterType
-  );
+function personsFetcher() {
+  return fetchPersons();
+}
+
+export default function FacePage() {
+  const { data: persons, isLoading, mutate } = useSWR<Person[]>('face-persons', personsFetcher);
+  const { data: rules } = useSWR<SceneRule[]>('face-rules', () => fetchSceneRules());
+  const { data: cameras } = useSWR<ApiCamera[]>('face-cameras', fetchCameras);
+  const { data: logs } = useSWR<RecognitionLog[]>('face-logs', fetchRecognitionLogs, { refreshInterval: 10000 });
+  const { data: identities } = useSWR<TrackIdentity[]>('face-track-identities', fetchTrackIdentities, { refreshInterval: 10000 });
+
+  const [showModal, setShowModal] = useState(false);
+  const [selectedPersonId, setSelectedPersonId] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [newPerson, setNewPerson] = useState({
+    name: '',
+    person_type: 'employee',
+    employee_no: '',
+    email: '',
+    phone: '',
+    notes: '',
+  });
+  const [authForm, setAuthForm] = useState({ person_id: '', rule_id: '', camera_id: '' });
+
+  const stats = useMemo(() => {
+    const rows = persons ?? [];
+    return {
+      total: rows.length,
+      faceProfiles: rows.reduce((sum, p) => sum + p.face_profiles.length, 0),
+      blacklist: rows.filter((p) => p.person_type === 'blacklist').length,
+      unknownTracks: (identities ?? []).filter((x) => x.identity_status === 'unknown').length,
+    };
+  }, [persons, identities]);
+
+  async function savePerson() {
+    setSaving(true);
+    setMessage(null);
+    try {
+      await createPerson({
+        name: newPerson.name,
+        person_type: newPerson.person_type,
+        employee_no: newPerson.employee_no || null,
+        email: newPerson.email || null,
+        phone: newPerson.phone || null,
+        notes: newPerson.notes || null,
+        is_active: true,
+      });
+      setShowModal(false);
+      setNewPerson({ name: '', person_type: 'employee', employee_no: '', email: '', phone: '', notes: '' });
+      await mutate();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleFaceUpload(personId: number, file: File | null) {
+    if (!file) return;
+    setMessage(null);
+    try {
+      await uploadFaceProfile(personId, file);
+      setMessage('人脸照片已上传并提取本地特征');
+      await mutate();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : '上传失败');
+    }
+  }
+
+  async function saveAuthorization() {
+    if (!authForm.person_id) return;
+    setMessage(null);
+    try {
+      await createPersonAuthorization({
+        person_id: Number(authForm.person_id),
+        rule_id: authForm.rule_id ? Number(authForm.rule_id) : null,
+        camera_id: authForm.camera_id ? Number(authForm.camera_id) : null,
+        schedule_json: { authorized_windows: [{ start: '06:00', end: '22:00' }] },
+        is_enabled: true,
+      });
+      setAuthForm({ person_id: '', rule_id: '', camera_id: '' });
+      setMessage('授权规则已保存');
+      await mutate();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : '授权保存失败');
+    }
+  }
 
   return (
     <Sidebar currentPath="/face">
-      <Header 
-        title="人脸识别" 
-        subtitle="人员管理与通行记录"
+      <Header
+        title="人脸识别与人员授权"
+        subtitle="人员库、人脸模板、区域授权与轨迹身份识别结果"
         statusBadge={
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-emerald-400 text-sm font-medium">识别服务正常</span>
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30">
+            <Fingerprint className="w-4 h-4 text-cyan-400" />
+            <span className="text-cyan-400 text-sm font-medium">{stats.faceProfiles} 个人脸模板</span>
           </div>
         }
       >
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500 text-white text-sm font-medium hover:bg-cyan-400 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            添加人员
-          </button>
-        </div>
+        <button type="button" onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500 text-white text-sm font-medium hover:bg-cyan-400">
+          <Plus className="w-4 h-4" />
+          新增人员
+        </button>
       </Header>
 
       <div className="flex-1 p-6 overflow-y-auto">
-        {/* Tab切换 */}
-        <div className="flex items-center gap-2 mb-6">
-          <button
-            onClick={() => setActiveTab('persons')}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
-              activeTab === 'persons' 
-                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' 
-                : 'bg-slate-800/50 text-slate-400 border border-slate-700/50 hover:border-slate-600'
-            }`}
-          >
-            <Users className="w-4 h-4 inline mr-2" />
-            人员管理 ({personsData.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('records')}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
-              activeTab === 'records' 
-                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' 
-                : 'bg-slate-800/50 text-slate-400 border border-slate-700/50 hover:border-slate-600'
-            }`}
-          >
-            <Clock className="w-4 h-4 inline mr-2" />
-            通行记录
-          </button>
+        {message && <div className="mb-4 p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 text-sm">{message}</div>}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+          <div className="dashboard-card rounded-2xl p-4"><p className="text-sm text-slate-400">人员总数</p><p className="text-2xl font-bold text-white">{stats.total}</p></div>
+          <div className="dashboard-card rounded-2xl p-4"><p className="text-sm text-slate-400">人脸模板</p><p className="text-2xl font-bold text-cyan-300">{stats.faceProfiles}</p></div>
+          <div className="dashboard-card rounded-2xl p-4"><p className="text-sm text-slate-400">黑名单</p><p className="text-2xl font-bold text-red-300">{stats.blacklist}</p></div>
+          <div className="dashboard-card rounded-2xl p-4"><p className="text-sm text-slate-400">未知轨迹</p><p className="text-2xl font-bold text-amber-300">{stats.unknownTracks}</p></div>
         </div>
 
-        {activeTab === 'persons' ? (
-          <>
-            {/* 筛选栏 */}
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input 
-                    type="text" 
-                    placeholder="搜索人员..." 
-                    className="pl-9 pr-4 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:border-cyan-500/50 transition-colors w-64"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  {['all', '员工', 'VIP', '访客', '黑名单'].map((type) => (
-                    <button
-                      key={type}
-                      onClick={() => setFilterType(type)}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                        filterType === type 
-                          ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' 
-                          : 'bg-slate-800/50 text-slate-400 border border-slate-700/50 hover:border-slate-600'
-                      }`}
-                    >
-                      {type === 'all' ? '全部' : type}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`p-2 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-500 hover:text-slate-300'}`}
-                >
-                  <Grid3X3 className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`p-2 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-500 hover:text-slate-300'}`}
-                >
-                  <List className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
+        <div className="dashboard-card rounded-2xl p-5 mb-6">
+          <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-emerald-400" />人员授权配置</h3>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <select value={authForm.person_id} onChange={(e) => setAuthForm({ ...authForm, person_id: e.target.value })} className="px-3 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm">
+              <option value="">选择人员</option>
+              {(persons ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <select value={authForm.rule_id} onChange={(e) => setAuthForm({ ...authForm, rule_id: e.target.value })} className="px-3 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm">
+              <option value="">全部规则/不限定</option>
+              {(rules ?? []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+            <select value={authForm.camera_id} onChange={(e) => setAuthForm({ ...authForm, camera_id: e.target.value })} className="px-3 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm">
+              <option value="">全部摄像头/不限定</option>
+              {(cameras ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <button type="button" onClick={saveAuthorization} disabled={!authForm.person_id} className="px-4 py-2 rounded-xl bg-emerald-500 text-white disabled:opacity-50">保存授权</button>
+          </div>
+          <p className="text-xs text-slate-500 mt-3">授权状态会进入告警分级：黑名单、未知人员、未授权人员会提高风险等级。</p>
+        </div>
 
-            {/* 人员网格/列表 */}
-            <div className={`grid gap-4 ${viewMode === 'grid' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'grid-cols-1'}`}>
-              {filteredPersons.map((person) => {
-                const status = statusConfig[person.status];
-                return (
-                  <div
-                    key={person.id}
-                    onClick={() => setSelectedPerson(person)}
-                    className={`dashboard-card rounded-2xl overflow-hidden cursor-pointer group transition-all hover:ring-2 hover:ring-cyan-500/30 ${
-                      selectedPerson?.id === person.id ? 'ring-2 ring-cyan-400' : ''
-                    }`}
-                  >
-                    {viewMode === 'grid' ? (
-                      <>
-                        {/* 人脸占位 */}
-                        <div className="aspect-square bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center relative">
-                          <div className="w-24 h-24 rounded-full bg-slate-700/50 border-2 border-dashed border-slate-600 flex items-center justify-center">
-                            <User className="w-12 h-12 text-slate-600" />
-                          </div>
-                          {/* 状态标签 */}
-                          <div className={`absolute top-3 right-3 px-2 py-1 rounded-lg ${status.bg}`}>
-                            <span className={`text-xs font-medium ${status.color}`}>{status.label}</span>
-                          </div>
-                          {/* 置信度 */}
-                          <div className="absolute bottom-3 left-3 right-3">
-                            <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-                              <span>识别置信度</span>
-                              <span className="text-emerald-400">{person.confidence}%</span>
-                            </div>
-                            <div className="h-1.5 bg-slate-700/50 rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 rounded-full"
-                                style={{ width: `${person.confidence}%` }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                        {/* 信息 */}
-                        <div className="p-4">
-                          <h4 className="text-white font-medium mb-1">{person.name}</h4>
-                          <p className="text-sm text-slate-500 mb-2">{person.employeeId}</p>
-                          <div className="flex items-center justify-between text-xs text-slate-500">
-                            <span>{person.department}</span>
-                            <span>{person.type}</span>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      /* 列表视图 */
-                      <div className="p-4 flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-full bg-slate-700/50 flex items-center justify-center flex-shrink-0">
-                          <User className="w-6 h-6 text-slate-500" />
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-white font-medium">{person.name}</h4>
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${status.bg} ${status.color}`}>
-                              {status.label}
-                            </span>
-                          </div>
-                          <p className="text-sm text-slate-500">{person.employeeId} · {person.department}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm text-emerald-400">{person.confidence}%</p>
-                          <p className="text-xs text-slate-500">{person.lastSeen}</p>
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-slate-500" />
-                      </div>
-                    )}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="xl:col-span-2 space-y-3">
+            {isLoading && <p className="text-slate-400 flex items-center gap-2"><Loader2 className="w-5 h-5 animate-spin" />加载人员库…</p>}
+            {(persons ?? []).map((person) => (
+              <div key={person.id} className="dashboard-card rounded-2xl p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <User className="w-5 h-5 text-cyan-400" />
+                      <h3 className="text-white font-medium">{person.name}</h3>
+                      <span className={`px-2 py-0.5 rounded-full text-xs border ${personTypeClasses[person.person_type] ?? personTypeClasses.unknown}`}>
+                        {personTypeLabels[person.person_type] ?? person.person_type}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-500">{person.employee_no || '无编号'} · {person.email || '无邮箱'} · 授权 {person.authorizations.length} 条</p>
                   </div>
-                );
-              })}
-            </div>
-          </>
-        ) : (
-          /* 通行记录 */
-          <div className="dashboard-card rounded-2xl overflow-hidden">
-            <div className="p-4 border-b border-slate-700/30">
-              <h3 className="text-lg font-bold text-white">最近通行记录</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-slate-800/50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">姓名</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">通行位置</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">识别类型</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">通行时间</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">结果</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-700/30">
-                  {accessRecords.map((record) => (
-                    <tr key={record.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-slate-700/50 flex items-center justify-center">
-                            <User className="w-4 h-4 text-slate-500" />
-                          </div>
-                          <span className="text-white font-medium">{record.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-400 flex items-center gap-1">
-                        <MapPin className="w-4 h-4 mr-1" />
-                        {record.location}
-                      </td>
-                      <td className="px-4 py-3 text-slate-400">{record.type}</td>
-                      <td className="px-4 py-3 text-slate-400">{record.time}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                          record.result === '通过' ? 'bg-emerald-500/10 text-emerald-400' :
-                          record.result === '拒绝' ? 'bg-red-500/10 text-red-400' :
-                          'bg-cyan-500/10 text-cyan-400'
-                        }`}>
-                          {record.result}
-                        </span>
-                      </td>
-                    </tr>
+                  <label className="px-3 py-2 rounded-xl bg-cyan-500/20 text-cyan-200 text-sm cursor-pointer hover:bg-cyan-500/30 flex items-center gap-2">
+                    <Upload className="w-4 h-4" />
+                    上传人脸
+                    <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFaceUpload(person.id, e.target.files?.[0] ?? null)} />
+                  </label>
+                </div>
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {person.face_profiles.map((face) => (
+                    <a key={face.id} href={evidenceToUrl(face.image_path) ?? '#'} target="_blank" rel="noreferrer" className="px-2 py-1 rounded-lg bg-slate-800/80 text-xs text-slate-300 border border-slate-700/50">
+                      模板 #{face.id} · 质量 {face.quality_score.toFixed(2)}
+                    </a>
                   ))}
-                </tbody>
-              </table>
+                  {!person.face_profiles.length && <span className="text-xs text-amber-300">未上传人脸照片，无法被自动识别</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-4">
+            <div className="dashboard-card rounded-2xl p-4">
+              <h3 className="text-white font-bold mb-3 flex items-center gap-2"><Camera className="w-5 h-5 text-cyan-400" />最近识别记录</h3>
+              <div className="space-y-2 max-h-72 overflow-y-auto">
+                {(logs ?? []).slice(0, 8).map((log) => (
+                  <div key={log.id} className="p-3 rounded-xl bg-slate-800/50 text-sm">
+                    <p className="text-white">轨迹 #{log.track_id ?? '—'} · {log.status}</p>
+                    <p className="text-xs text-slate-500">置信度 {log.confidence.toFixed(3)} · {new Date(log.created_at).toLocaleString('zh-CN')}</p>
+                  </div>
+                ))}
+                {!logs?.length && <p className="text-sm text-slate-500">暂无识别记录。</p>}
+              </div>
+            </div>
+            <div className="dashboard-card rounded-2xl p-4">
+              <h3 className="text-white font-bold mb-3 flex items-center gap-2"><UserX className="w-5 h-5 text-amber-400" />轨迹身份状态</h3>
+              <div className="space-y-2 max-h-72 overflow-y-auto">
+                {(identities ?? []).slice(0, 8).map((item) => (
+                  <div key={item.id} className="p-3 rounded-xl bg-slate-800/50 text-sm">
+                    <p className="text-white">轨迹 #{item.track_id} · {item.identity_status}</p>
+                    <p className="text-xs text-slate-500">授权 {item.authorization_status} · 置信度 {item.confidence.toFixed(3)}</p>
+                  </div>
+                ))}
+                {!identities?.length && <p className="text-sm text-slate-500">暂无轨迹身份。</p>}
+              </div>
             </div>
           </div>
-        )}
+        </div>
       </div>
 
-      {/* 添加人员弹窗 */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowAddModal(false)}>
-          <div className="dashboard-card rounded-2xl p-6 max-w-lg w-full animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+      {showModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowModal(false)}>
+          <div className="dashboard-card rounded-2xl p-6 max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-bold text-white">添加人员</h3>
-              <button onClick={() => setShowAddModal(false)} className="p-2 rounded-lg hover:bg-slate-700/50 transition-colors">
-                <X className="w-5 h-5 text-slate-400" />
-              </button>
+              <h3 className="text-lg font-bold text-white">新增人员</h3>
+              <button type="button" onClick={() => setShowModal(false)} className="p-2 rounded-lg hover:bg-slate-700/50"><X className="w-5 h-5 text-slate-400" /></button>
             </div>
-            <div className="space-y-4">
-              {/* 人脸录入区域 */}
-              <div className="aspect-video rounded-xl border-2 border-dashed border-cyan-500/30 bg-slate-800/30 flex flex-col items-center justify-center cursor-pointer hover:border-cyan-500/50 transition-colors">
-                <Camera className="w-12 h-12 text-cyan-400 mb-3" />
-                <p className="text-white font-medium mb-1">点击拍照录入人脸</p>
-                <p className="text-sm text-slate-500">请确保面部清晰可见，光线充足</p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">姓名</label>
-                  <input 
-                    type="text" 
-                    placeholder="请输入姓名"
-                    className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:border-cyan-500/50 transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">工号</label>
-                  <input 
-                    type="text" 
-                    placeholder="请输入工号"
-                    className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:border-cyan-500/50 transition-colors"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">部门</label>
-                  <select className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm focus:outline-none focus:border-cyan-500/50 transition-colors">
-                    <option value="">请选择部门</option>
-                    <option value="rd">研发部</option>
-                    <option value="market">市场部</option>
-                    <option value="security">安保部</option>
-                    <option value="hr">人事部</option>
-                    <option value="finance">财务部</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">人员类型</label>
-                  <select className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm focus:outline-none focus:border-cyan-500/50 transition-colors">
-                    <option value="员工">员工</option>
-                    <option value="VIP">VIP</option>
-                    <option value="访客">访客</option>
-                    <option value="黑名单">黑名单</option>
-                  </select>
-                </div>
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button className="flex-1 py-2.5 rounded-xl bg-cyan-500 text-white font-medium hover:bg-cyan-400 transition-colors flex items-center justify-center gap-2">
-                  <Check className="w-4 h-4" />
-                  确认添加
-                </button>
-                <button onClick={() => setShowAddModal(false)} className="px-6 py-2.5 rounded-xl bg-slate-700 text-white font-medium hover:bg-slate-600 transition-colors">
-                  取消
-                </button>
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <input value={newPerson.name} onChange={(e) => setNewPerson({ ...newPerson, name: e.target.value })} placeholder="姓名" className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
+              <select value={newPerson.person_type} onChange={(e) => setNewPerson({ ...newPerson, person_type: e.target.value })} className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm">
+                <option value="employee">员工</option>
+                <option value="visitor">访客</option>
+                <option value="contractor">施工/运维</option>
+                <option value="blacklist">黑名单</option>
+              </select>
+              <input value={newPerson.employee_no} onChange={(e) => setNewPerson({ ...newPerson, employee_no: e.target.value })} placeholder="员工/访客编号" className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
+              <input value={newPerson.email} onChange={(e) => setNewPerson({ ...newPerson, email: e.target.value })} placeholder="邮箱" className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
+              <input value={newPerson.phone} onChange={(e) => setNewPerson({ ...newPerson, phone: e.target.value })} placeholder="电话" className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
+              <input value={newPerson.notes} onChange={(e) => setNewPerson({ ...newPerson, notes: e.target.value })} placeholder="备注" className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 rounded-xl bg-slate-700 text-white">取消</button>
+              <button type="button" onClick={savePerson} disabled={saving || !newPerson.name} className="px-5 py-2.5 rounded-xl bg-cyan-500 text-white disabled:opacity-50 flex items-center gap-2">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                保存
+              </button>
             </div>
           </div>
         </div>

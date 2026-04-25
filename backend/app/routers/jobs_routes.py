@@ -55,12 +55,13 @@ async def create_job(
         if not isinstance(data, dict):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid JSON")
         local_path = (data.get("local_path") or "").strip()
+        camera_id = data.get("camera_id")
         if not local_path:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="local_path is required for JSON body",
             )
-        job = AnalysisJob(video_path=local_path, status=JobStatus.pending)
+        job = AnalysisJob(video_path=local_path, camera_id=camera_id, status=JobStatus.pending)
         db.add(job)
         db.commit()
         db.refresh(job)
@@ -76,12 +77,15 @@ async def create_job(
             )
         upload = file
         assert isinstance(upload, UploadFile)
-        settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+        upload_dir = settings.project_root / "storage" / "videos" / "jobs"
+        upload_dir.mkdir(parents=True, exist_ok=True)
         suffix = Path(upload.filename or "video").suffix or ".mp4"
-        dest = settings.uploads_dir / f"{uuid.uuid4().hex}{suffix}"
+        dest = upload_dir / f"{uuid.uuid4().hex}{suffix}"
         with dest.open("wb") as out:
             shutil.copyfileobj(upload.file, out)
-        job = AnalysisJob(video_path=str(dest.resolve()), status=JobStatus.pending)
+        raw_camera_id = form.get("camera_id")
+        camera_id = int(raw_camera_id) if raw_camera_id not in (None, "") else None
+        job = AnalysisJob(video_path=str(dest.resolve()), camera_id=camera_id, status=JobStatus.pending)
         db.add(job)
         db.commit()
         db.refresh(job)
@@ -105,11 +109,30 @@ def run_local_path(
     p = Path(body.path).expanduser()
     if not p.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    job = AnalysisJob(video_path=str(p.resolve()), status=JobStatus.pending)
+    job = AnalysisJob(video_path=str(p.resolve()), camera_id=body.camera_id, status=JobStatus.pending)
     db.add(job)
     db.commit()
     db.refresh(job)
     background_tasks.add_task(_enqueue_pipeline, job.id, str(p.resolve()))
+    return {"job_id": job.id, "status": "queued", "video_path": job.video_path}
+
+
+@router.post("/{job_id}/run", response_model=dict)
+def run_job(
+    job_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    job = db.query(AnalysisJob).filter(AnalysisJob.id == job_id).first()
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    if job.status == JobStatus.running:
+        return {"job_id": job.id, "status": "running"}
+    job.status = JobStatus.pending
+    job.error_message = None
+    db.commit()
+    background_tasks.add_task(_enqueue_pipeline, job.id, job.video_path)
     return {"job_id": job.id, "status": "queued", "video_path": job.video_path}
 
 

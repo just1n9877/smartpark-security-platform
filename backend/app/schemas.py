@@ -41,6 +41,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=64)
+    email: str = Field(..., min_length=5, max_length=255)
+    password: str = Field(..., min_length=6, max_length=128)
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -49,6 +55,7 @@ class TokenResponse(BaseModel):
 class UserPublic(BaseModel):
     id: int
     username: str
+    email: str | None = None
     role: UserRole
 
     model_config = {"from_attributes": True}
@@ -57,6 +64,18 @@ class UserPublic(BaseModel):
 class CameraCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     rtsp_url: str | None = None
+    location: str | None = None
+    risk_level: int = Field(default=2, ge=1, le=5)
+    is_active: bool = True
+    notes: str | None = None
+
+
+class CameraUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    rtsp_url: str | None = None
+    location: str | None = None
+    risk_level: int | None = Field(default=None, ge=1, le=5)
+    is_active: bool | None = None
     notes: str | None = None
 
 
@@ -64,6 +83,9 @@ class CameraOut(BaseModel):
     id: int
     name: str
     rtsp_url: str | None
+    location: str | None = None
+    risk_level: int = 2
+    is_active: bool = True
     notes: str | None
     created_at: UtcIsoZ
 
@@ -73,6 +95,7 @@ class CameraOut(BaseModel):
 class JobOut(BaseModel):
     id: int
     video_path: str
+    camera_id: int | None = None
     status: JobStatus
     error_message: str | None
     created_at: UtcIsoZ
@@ -88,6 +111,147 @@ class JobDetail(JobOut):
 
 class RunLocalPathBody(BaseModel):
     path: str = Field(..., min_length=1, description="本地视频绝对或相对路径")
+    camera_id: int | None = None
+
+
+class SceneRuleBase(BaseModel):
+    camera_id: int | None = None
+    name: str = Field(..., min_length=1, max_length=128)
+    rule_type: str = Field(
+        ...,
+        description="area | line_crossing | door | direction | object_proximity",
+    )
+    geometry: dict[str, Any]
+    risk_level: int = Field(default=2, ge=1, le=5)
+    is_enabled: bool = True
+    schedule_json: dict[str, Any] | None = None
+    allowed_direction: str | None = None
+    dwell_threshold_sec: float = Field(default=8.0, gt=0, le=3600)
+    config_json: dict[str, Any] | None = None
+
+
+class SceneRuleCreate(SceneRuleBase):
+    pass
+
+
+class SceneRuleUpdate(BaseModel):
+    camera_id: int | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    rule_type: str | None = None
+    geometry: dict[str, Any] | None = None
+    risk_level: int | None = Field(default=None, ge=1, le=5)
+    is_enabled: bool | None = None
+    schedule_json: dict[str, Any] | None = None
+    allowed_direction: str | None = None
+    dwell_threshold_sec: float | None = Field(default=None, gt=0, le=3600)
+    config_json: dict[str, Any] | None = None
+
+
+class SceneRuleOut(SceneRuleBase):
+    id: int
+    created_at: UtcIsoZ
+
+    model_config = {"from_attributes": True}
+
+
+class ZoneTopologyCreate(BaseModel):
+    zone_a_id: int
+    zone_b_id: int
+    time_window_sec: float = Field(default=30.0, gt=0, le=3600)
+    relation_type: str = "adjacent"
+
+
+class ZoneTopologyOut(ZoneTopologyCreate):
+    id: int
+    created_at: UtcIsoZ
+
+    model_config = {"from_attributes": True}
+
+
+class PersonCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    person_type: str = Field(default="employee", description="employee | visitor | contractor | blacklist")
+    employee_no: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    notes: str | None = None
+    is_active: bool = True
+
+
+class PersonUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    person_type: str | None = None
+    employee_no: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    notes: str | None = None
+    is_active: bool | None = None
+
+
+class FaceProfileOut(BaseModel):
+    id: int
+    person_id: int
+    image_path: str
+    quality_score: float
+    is_active: bool
+    created_at: UtcIsoZ
+
+    model_config = {"from_attributes": True}
+
+
+class PersonAuthorizationCreate(BaseModel):
+    person_id: int
+    rule_id: int | None = None
+    camera_id: int | None = None
+    schedule_json: dict[str, Any] | None = None
+    is_enabled: bool = True
+
+
+class PersonAuthorizationOut(PersonAuthorizationCreate):
+    id: int
+    created_at: UtcIsoZ
+
+    model_config = {"from_attributes": True}
+
+
+class PersonOut(PersonCreate):
+    id: int
+    created_at: UtcIsoZ
+    face_profiles: list[FaceProfileOut] = Field(default_factory=list)
+    authorizations: list[PersonAuthorizationOut] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+class FaceRecognitionLogOut(BaseModel):
+    id: int
+    job_id: int | None = None
+    camera_id: int | None = None
+    track_id: int | None = None
+    person_id: int | None = None
+    confidence: float
+    status: str
+    snapshot_path: str | None = None
+    created_at: UtcIsoZ
+
+    model_config = {"from_attributes": True}
+
+
+class TrackIdentityOut(BaseModel):
+    id: int
+    job_id: int | None = None
+    camera_id: int | None = None
+    track_id: int
+    person_id: int | None = None
+    identity_status: str
+    authorization_status: str
+    confidence: float
+    first_seen_at: UtcIsoZ
+    last_seen_at: UtcIsoZ
+    evidence_path: str | None = None
+    details_json: dict[str, Any] | None = None
+
+    model_config = {"from_attributes": True}
 
 
 class AlertOut(BaseModel):
@@ -95,10 +259,15 @@ class AlertOut(BaseModel):
     job_id: int | None = None
     level: str
     alert_type: str
+    rule_id: int | None = None
+    compound_event_id: int | None = None
     triggered_at: UtcIsoZ
     track_id: int | None
     camera_id: int | None
     keyframe_path: str | None
+    evidence_clip_path: str | None = None
+    reason: str | None = None
+    reason_json: dict[str, Any] | None = None
     is_confirmed: bool
     trajectory_features: dict[str, Any] | None = None
     ml_scores: dict[str, Any] | None = None
@@ -107,10 +276,6 @@ class AlertOut(BaseModel):
     )
 
     model_config = {"from_attributes": True}
-
-
-class AlertDetail(AlertOut):
-    pass
 
 
 class FeedbackCreate(BaseModel):
@@ -125,8 +290,14 @@ class FeedbackOut(BaseModel):
     label: FeedbackLabel
     note: str | None
     created_at: UtcIsoZ
+    updated_at: UtcIsoZ | None = None
 
     model_config = {"from_attributes": True}
+
+
+class AlertDetail(AlertOut):
+    feedback: FeedbackOut | None = None
+    correlations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class FeedbackResult(BaseModel):
@@ -278,6 +449,45 @@ class AlertTrajectoryOut(BaseModel):
     points: list[TrajectoryPoint2D]
     narrative: str
     alert_type: str | None = None
+
+
+class AssistantRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+
+
+class AssistantResponse(BaseModel):
+    answer: str
+    suggestions: list[str] = Field(default_factory=list)
+    source: str = "local_rules"
+
+
+class AtomicEventOut(BaseModel):
+    id: int
+    job_id: int | None = None
+    camera_id: int | None = None
+    rule_id: int | None = None
+    track_id: int
+    event_type: str
+    event_ts: float
+    event_at: UtcIsoZ
+    payload_json: dict[str, Any] | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class CompoundEventOut(BaseModel):
+    id: int
+    job_id: int | None = None
+    camera_id: int | None = None
+    rule_id: int | None = None
+    track_id: int
+    event_type: str
+    event_ts: float
+    event_at: UtcIsoZ
+    reason_json: dict[str, Any] | None = None
+    is_open: bool
+
+    model_config = {"from_attributes": True}
 
 
 class ActivateModelBody(BaseModel):

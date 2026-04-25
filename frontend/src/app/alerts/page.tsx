@@ -3,8 +3,8 @@
 import { useMemo, useState } from 'react';
 import useSWR from 'swr';
 import {
-  AlertTriangle, Search, RefreshCw, Check, Clock, MapPin,
-  Eye, ChevronDown, Shield, Users, UserX, ArrowUpDown, Bell, Zap, Loader2, Brain,
+  AlertTriangle, Search, RefreshCw, Clock, MapPin,
+  Eye, ChevronDown, Shield, ArrowUpDown, Bell, Zap, Loader2, Brain,
 } from 'lucide-react';
 import { Sidebar, Header } from '@/components/Sidebar';
 import {
@@ -24,8 +24,12 @@ function trajectoryFetcher(id: number) {
 
 /** 后端 level → 卡片用 */
 function uiLevel(raw: string): 'critical' | 'warning' | 'medium' | 'low' {
+  if (raw === 'critical') return 'critical';
+  if (raw === 'high') return 'warning';
+  if (raw === 'medium') return 'medium';
+  if (raw === 'low') return 'low';
   if (raw === 'alert') return 'critical';
-  if (raw === 'warning') return 'warning';
+  if (raw === 'warning') return 'medium';
   if (raw === 'info') return 'low';
   return 'medium';
 }
@@ -39,9 +43,9 @@ const borderLeftByUi: Record<string, string> = {
 
 const levelConfig: Record<string, { color: string; bg: string; border: string; label: string }> = {
   critical: { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: '紧急' },
-  warning: { color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30', label: '预警' },
-  medium: { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: '中等' },
-  low: { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', label: '低' },
+  warning: { color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30', label: '严重' },
+  medium: { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: '一般' },
+  low: { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', label: '低风险' },
 };
 
 const statusConfig = {
@@ -59,7 +63,9 @@ const typeIcon: Record<string, React.ElementType> = {
 };
 
 const FEEDBACK_OPTIONS: { value: FeedbackLabel; label: string }[] = [
+  { value: 'true_alert', label: '真实告警' },
   { value: 'false_positive', label: '误报' },
+  { value: 'uncertain', label: '暂不确定' },
   { value: 'delivery', label: '外卖/快递' },
   { value: 'visitor', label: '访客' },
   { value: 'work', label: '施工/运维' },
@@ -98,13 +104,13 @@ export default function AlertsPage() {
         type: a.alert_type,
         level: ul,
         time: new Date(a.triggered_at).toLocaleString('zh-CN'),
-        description: `${a.alert_type} · 轨迹 #${a.track_id ?? '—'} · job ${a.job_id ?? '—'}${
+        description: `${a.reason ?? a.alert_type} · 轨迹 #${a.track_id ?? '—'} · job ${a.job_id ?? '—'}${
           a.ai_combined_score != null ? ` · AI异常分 ${a.ai_combined_score.toFixed(2)}` : ''
         }`,
         location:
           a.camera_id != null ? `摄像头 ID ${a.camera_id}` : '未绑定摄像头（离线任务）',
         source: a.keyframe_path ? '关键帧已存证' : '无关键帧',
-        status: a.is_confirmed ? 'resolved' : 'pending',
+        status: a.feedback ? 'resolved' : 'pending',
         keyframeUrl: keyframeToUrl(a.keyframe_path),
       };
     });
@@ -386,7 +392,15 @@ export default function AlertsPage() {
                       </div>
                     )}
                     <div className="mt-4 space-y-2">
-                      <p className="text-xs text-slate-500">安保反馈（写入后端 Feedback 表）</p>
+                      <p className="text-xs text-slate-500">
+                        安保反馈（一条告警只有一个最终反馈，可在这里修改）
+                      </p>
+                      {alert.raw.feedback && (
+                        <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-sm text-cyan-100">
+                          当前反馈：{FEEDBACK_OPTIONS.find((x) => x.value === alert.raw.feedback?.label)?.label ?? alert.raw.feedback.label}
+                          {alert.raw.feedback.note ? ` · ${alert.raw.feedback.note}` : ''}
+                        </div>
+                      )}
                       <textarea
                         value={feedbackNote}
                         onChange={(e) => setFeedbackNote(e.target.value)}

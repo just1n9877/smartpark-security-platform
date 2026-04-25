@@ -9,11 +9,14 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine, ensure_sqlite_migrations
 from app.routers import (
     admin_routes,
+    assistant_routes,
     alerts_routes,
     auth_routes,
     cameras_routes,
     dashboard_routes,
+    face_routes,
     jobs_routes,
+    scene_rules_routes,
     settings_routes,
 )
 from app.model_registry import sync_active_version_from_db
@@ -45,7 +48,10 @@ app = FastAPI(
 app.include_router(auth_routes.router, prefix="/auth", tags=["auth"])
 app.include_router(alerts_routes.router, prefix="/alerts", tags=["alerts"])
 app.include_router(cameras_routes.router, prefix="/cameras", tags=["cameras"])
+app.include_router(face_routes.router, prefix="/face", tags=["face"])
 app.include_router(jobs_routes.router, prefix="/jobs", tags=["jobs"])
+app.include_router(scene_rules_routes.router, prefix="/scene-rules", tags=["scene-rules"])
+app.include_router(assistant_routes.router, prefix="/assistant", tags=["assistant"])
 app.include_router(dashboard_routes.router, prefix="/dashboard", tags=["dashboard"])
 app.include_router(settings_routes.router, prefix="/settings", tags=["settings"])
 app.include_router(admin_routes.router, prefix="/admin", tags=["admin"])

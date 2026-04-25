@@ -24,12 +24,15 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, ensure_sqlite_migrations
 from app.model_registry import sync_active_version_from_db
-from app.models import Alert, AnalysisJob, JobStatus, TrajectoryPoint, TrajectorySummary
+from app.models import Alert, AlertCorrelation, AnalysisJob, AtomicEvent, CompoundEvent, JobStatus, TrajectoryPoint, TrajectorySummary, ZoneTopology
 from app.system_config_service import effective_config_for_pipeline
 from app.unified_policy import combine_rule_and_ml_risk
 from ml.inference import default_seq_len_for_gru, score_trajectory
 from ml.sequence import points_to_sequence
 from services.alert_engine import AlertEngine
+from services.behavior_analyzer import BehaviorAnalyzer
+from services.event_builder import EventBuilder, TrackObservation
+from services.face_recognition_service import recognize_track
 from services.ml_scoring import (
     any_model_loaded,
     combined_anomaly_01,
@@ -38,6 +41,7 @@ from services.ml_scoring import (
     should_emit_iforest_alert,
 )
 from services.pipeline_config import load_pipeline_config
+from services.scene_rules import load_scene_rules
 from services.tracking_pipeline import TrackingPipeline
 from services.trajectory_analytics import compute_trajectory_features, denormalize_rect, point_in_rect
 
@@ -57,6 +61,26 @@ def _ml_alert_exists(db: Session, job_id: int, track_id: int, alert_type: str) -
         .first()
         is not None
     )
+
+
+def _add_alert_enhancements(db: Session, alert: Alert) -> None:
+    if alert.rule_id is None:
+        return
+    links = db.query(ZoneTopology).filter(ZoneTopology.zone_a_id == alert.rule_id).all()
+    for link in links:
+        db.add(
+            AlertCorrelation(
+                primary_alert_id=alert.id,
+                related_alert_id=None,
+                camera_id=None,
+                relation_type="topology_enhancement",
+                details_json={
+                    "zone_b_id": link.zone_b_id,
+                    "time_window_sec": link.time_window_sec,
+                    "message": "触发告警后建议联动查看拓扑相邻区域/摄像头。",
+                },
+            )
+        )
 
 
 def run_pipeline_for_job(
@@ -98,6 +122,8 @@ def run_pipeline_for_job(
         db.query(TrajectorySummary).filter(TrajectorySummary.job_id == job_id).delete(
             synchronize_session=False
         )
+        db.query(AtomicEvent).filter(AtomicEvent.job_id == job_id).delete(synchronize_session=False)
+        db.query(CompoundEvent).filter(CompoundEvent.job_id == job_id).delete(synchronize_session=False)
         db.query(Alert).filter(Alert.job_id == job_id).delete(synchronize_session=False)
         db.commit()
 
@@ -119,7 +145,11 @@ def run_pipeline_for_job(
             conf=cfg.conf,
             embedder_gpu=cfg.embedder_gpu,
         )
-        alert_engine = AlertEngine(cfg)
+        camera_id = job.camera_id
+        rules = load_scene_rules(db, camera_id, cfg)
+        event_builder = EventBuilder(rules)
+        behavior_analyzer = BehaviorAnalyzer()
+        alert_engine = AlertEngine()
 
         points_by_track: dict[int, list[tuple[int, float, float, float]]] = defaultdict(list)
         pending_rows: list[TrajectoryPoint] = []
@@ -145,6 +175,7 @@ def run_pipeline_for_job(
                 pending_rows.append(
                     TrajectoryPoint(
                         job_id=job_id,
+                        camera_id=camera_id,
                         frame_idx=tr.frame_idx,
                         track_id=tr.track_id,
                         cx=tr.cx,
@@ -154,25 +185,81 @@ def run_pipeline_for_job(
                         ts=ts,
                     )
                 )
-                for ev in alert_engine.process_track(
-                    tr.track_id, tr.cx, tr.cy, tr.frame_idx, fps, fw, fh
-                ):
+                identity = recognize_track(
+                    db,
+                    frame,
+                    job_id=job_id,
+                    camera_id=camera_id,
+                    track_id=tr.track_id,
+                    bbox=(tr.x1, tr.y1, tr.x2, tr.y2),
+                )
+                obs = TrackObservation(
+                    camera_id=camera_id,
+                    track_id=tr.track_id,
+                    cx=tr.cx,
+                    cy=tr.cy,
+                    w=tr.w,
+                    h=tr.h,
+                    ts=ts,
+                    frame_w=fw,
+                    frame_h=fh,
+                    identity=identity,
+                )
+                atomic_events = event_builder.build(obs)
+                for ae in atomic_events:
+                    db.add(
+                        AtomicEvent(
+                            job_id=job_id,
+                            camera_id=camera_id,
+                            rule_id=ae.rule.id,
+                            track_id=ae.track_id,
+                            event_type=ae.event_type,
+                            event_ts=ae.ts,
+                            event_at=ae.event_at,
+                            payload_json=ae.payload,
+                        )
+                    )
+                    if ae.event_type.endswith("_leave") or ae.event_type == "object_leave":
+                        alert_engine.reset_lifecycle(ae.rule.id, ae.track_id)
+                compound_events = behavior_analyzer.observe(obs, atomic_events, rules)
+                for ce in compound_events:
+                    ce_row = CompoundEvent(
+                        job_id=job_id,
+                        camera_id=camera_id,
+                        rule_id=ce.rule.id,
+                        track_id=ce.track_id,
+                        event_type=ce.event_type,
+                        event_ts=ce.ts,
+                        event_at=ce.event_at,
+                        reason_json=ce.reason_json,
+                        is_open=True,
+                    )
+                    db.add(ce_row)
+                    db.flush()
+                    ev = alert_engine.process_compound_event(ce)
+                    if ev is None:
+                        continue
                     rel = f"storage/frames/job{job_id}_tid{tr.track_id}_f{tr.frame_idx}.jpg"
                     out_abs = _ROOT.joinpath(*rel.split("/"))
                     out_abs.parent.mkdir(parents=True, exist_ok=True)
                     cv2.imwrite(str(out_abs), frame)
-                    db.add(
-                        Alert(
+                    alert = Alert(
                             job_id=job_id,
                             level=ev.level,
                             alert_type=ev.alert_type,
                             triggered_at=datetime.now(timezone.utc),
                             track_id=ev.track_id,
-                            camera_id=None,
+                            camera_id=camera_id,
+                            rule_id=ev.rule_id,
+                            compound_event_id=ce_row.id,
                             keyframe_path=rel.replace("\\", "/"),
+                            reason=ev.reason,
+                            reason_json=ev.reason_json,
                             is_confirmed=ev.is_confirmed,
                         )
-                    )
+                    db.add(alert)
+                    db.flush()
+                    _add_alert_enhancements(db, alert)
                     db.commit()
 
             if len(pending_rows) >= cfg.batch_insert_frames:
@@ -196,6 +283,7 @@ def run_pipeline_for_job(
             db.add(
                 TrajectorySummary(
                     job_id=job_id,
+                    camera_id=camera_id,
                     track_id=tid,
                     features_json=feats,
                 )
@@ -240,11 +328,13 @@ def run_pipeline_for_job(
                     db.add(
                         Alert(
                             job_id=job_id,
-                            level="warning",
+                            level="medium",
                             alert_type="trajectory_ml_iforest",
                             triggered_at=datetime.now(timezone.utc),
                             track_id=s.track_id,
-                            camera_id=None,
+                            camera_id=camera_id,
+                            reason="轨迹模型判定该目标偏离园区常态，需人工复核。",
+                            reason_json={"compound_event_type": "trajectory_ml_iforest", "model": "iforest"},
                             keyframe_path=None,
                             is_confirmed=False,
                         )
@@ -255,11 +345,13 @@ def run_pipeline_for_job(
                     db.add(
                         Alert(
                             job_id=job_id,
-                            level="warning",
+                            level="medium",
                             alert_type="trajectory_ml_gru",
                             triggered_at=datetime.now(timezone.utc),
                             track_id=s.track_id,
-                            camera_id=None,
+                            camera_id=camera_id,
+                            reason="GRU 轨迹模型判定该目标偏离园区常态，需人工复核。",
+                            reason_json={"compound_event_type": "trajectory_ml_gru", "model": "gru_ae"},
                             keyframe_path=None,
                             is_confirmed=False,
                         )

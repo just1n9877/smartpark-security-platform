@@ -10,7 +10,11 @@ import { Sidebar, Header } from '@/components/Sidebar';
 import {
   apiFetch,
   fetchDashboardMetrics,
+  runJob,
+  uploadJob,
+  evidenceToUrl,
   type ApiAlert,
+  type ApiJob,
   type DashboardMetrics,
   type DashboardSummary,
 } from '@/lib/api';
@@ -18,6 +22,7 @@ import {
 const summaryFetcher = () => apiFetch<DashboardSummary>('/dashboard/summary');
 const alertsFetcher = () => apiFetch<ApiAlert[]>('/alerts?limit=500');
 const metricsFetcher = () => fetchDashboardMetrics();
+const jobsFetcher = () => apiFetch<ApiJob[]>('/jobs?limit=20');
 
 export default function AnalyticsPage() {
   const { data: summary, isLoading: sLoad } = useSWR('analytics-summary', summaryFetcher, {
@@ -27,8 +32,29 @@ export default function AnalyticsPage() {
   const { data: metrics, isLoading: mLoad } = useSWR<DashboardMetrics>('analytics-metrics', metricsFetcher, {
     refreshInterval: 30000,
   });
+  const { data: jobs, mutate: mutateJobs } = useSWR<ApiJob[]>('analytics-jobs', jobsFetcher, {
+    refreshInterval: 5000,
+  });
 
   const [selectedArea, setSelectedArea] = useState('all');
+  const [uploading, setUploading] = useState(false);
+  const [jobMessage, setJobMessage] = useState<string | null>(null);
+
+  async function handleUpload(file: File | null) {
+    if (!file) return;
+    setUploading(true);
+    setJobMessage(null);
+    try {
+      const job = await uploadJob(file);
+      await runJob(job.id);
+      setJobMessage(`任务 ${job.id} 已上传并开始分析`);
+      await mutateJobs();
+    } catch (e) {
+      setJobMessage(e instanceof Error ? e.message : '上传或启动失败');
+    } finally {
+      setUploading(false);
+    }
+  }
 
   const alertTrendData = useMemo(() => {
     if (!summary?.alerts_by_day_7d?.length) {
@@ -141,6 +167,41 @@ export default function AnalyticsPage() {
             加载统计数据…
           </div>
         )}
+
+        <div className="dashboard-card rounded-2xl p-5 mb-6 border border-cyan-500/20">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+            <div>
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Activity className="w-5 h-5 text-cyan-400" />
+                视频分析任务
+              </h3>
+              <p className="text-sm text-slate-500">从前端上传视频、启动分析、查看任务状态和原视频。</p>
+            </div>
+            <label className="px-4 py-2 rounded-xl bg-cyan-500 text-white text-sm font-medium hover:bg-cyan-400 cursor-pointer">
+              {uploading ? '上传中…' : '上传并分析视频'}
+              <input type="file" accept="video/*" className="hidden" onChange={(e) => handleUpload(e.target.files?.[0] ?? null)} />
+            </label>
+          </div>
+          {jobMessage && <p className="text-sm text-cyan-300 mb-3">{jobMessage}</p>}
+          <div className="space-y-2">
+            {(jobs ?? []).map((job) => {
+              const url = evidenceToUrl(job.video_path);
+              return (
+                <div key={job.id} className="p-3 rounded-xl bg-slate-800/50 border border-slate-700/50 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-white text-sm">任务 #{job.id} · {job.status}</p>
+                    <p className="text-xs text-slate-500">告警 {job.alerts_count ?? 0} · 轨迹 {job.trajectory_summaries_count ?? 0}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => runJob(job.id).then(() => mutateJobs())} className="px-3 py-1.5 rounded-lg bg-slate-700 text-slate-200 text-xs">重新分析</button>
+                    {url && <a href={url} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 text-xs">查看视频</a>}
+                  </div>
+                </div>
+              );
+            })}
+            {!jobs?.length && <p className="text-sm text-slate-500">暂无任务。</p>}
+          </div>
+        </div>
 
         <div className="dashboard-card rounded-2xl p-5 mb-6 border border-cyan-500/20">
           <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">

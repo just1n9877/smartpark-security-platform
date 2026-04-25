@@ -1,168 +1,103 @@
-"""提前预警规则与去抖（冷却 + 连续帧确认）。"""
+"""复合事件告警决策：生命周期去重、分级和原因生成。"""
 
 from __future__ import annotations
 
-import math
-import time
 from dataclasses import dataclass
 
-import cv2
-import numpy as np
-
-from services.pipeline_config import PipelineConfig
-from services.trajectory_analytics import denormalize_rect, point_in_rect
+from services.behavior_analyzer import CompoundEventData
 
 
 @dataclass
 class AlertEvent:
     level: str
     alert_type: str
-    frame_idx: int
     track_id: int
+    camera_id: int | None
+    rule_id: int | None
+    compound_event: CompoundEventData
     is_confirmed: bool
-    detail: str
-
-
-@dataclass
-class _TrackAlertState:
-    in_roi_prev: bool = False
-    dwell_roi_frames: int = 0
-    reversal_count: int = 0
-    prev_cx: float | None = None
-    prev_cy: float | None = None
-    vx_prev: float | None = None
-    vy_prev: float | None = None
-    consec_warning: int = 0
-    consec_alert: int = 0
-    last_alert_monotonic: float = 0.0
+    reason: str
+    reason_json: dict
 
 
 class AlertEngine:
-    """每帧根据轨迹中心点与 ROI 更新状态，在满足去抖条件时产出告警事件。"""
+    """只接收复合事件；同一目标在离开规则范围前不会重复报警。"""
 
-    def __init__(self, cfg: PipelineConfig) -> None:
-        self.cfg = cfg
-        self._states: dict[int, _TrackAlertState] = {}
+    def __init__(self) -> None:
+        self._open_keys: set[tuple[int | None, int | None, int, str]] = set()
 
-    def _roi_contains(self, cx: float, cy: float, fw: int, fh: int) -> bool:
-        if self.cfg.roi_mode == "polygon" and self.cfg.polygon_norm:
-            pts = np.array(
-                [[float(x) * fw, float(y) * fh] for x, y in self.cfg.polygon_norm],
-                dtype=np.float32,
-            )
-            return cv2.pointPolygonTest(pts, (cx, cy), False) >= 0
-        x1, y1, x2, y2 = denormalize_rect(self.cfg.rect_norm, fw, fh)
-        return point_in_rect(cx, cy, x1, y1, x2, y2)
+    def reset_lifecycle(self, rule_id: int | None, track_id: int) -> None:
+        for key in list(self._open_keys):
+            if key[1] == rule_id and key[2] == track_id:
+                self._open_keys.remove(key)
 
-    def _cooldown_ok(self, st: _TrackAlertState) -> bool:
-        return (time.monotonic() - st.last_alert_monotonic) >= self.cfg.cooldown_sec
+    def process_compound_event(self, event: CompoundEventData) -> AlertEvent | None:
+        key = (event.camera_id, event.rule.id, event.track_id, event.event_type)
+        if key in self._open_keys:
+            return None
+        self._open_keys.add(key)
+        level = self._level_for(event)
+        reason = self._reason_text(event, level)
+        reason_json = {**event.reason_json, "alert_level": level, "reason": reason}
+        return AlertEvent(
+            level=level,
+            alert_type=event.event_type,
+            track_id=event.track_id,
+            camera_id=event.camera_id,
+            rule_id=event.rule.id,
+            compound_event=event,
+            is_confirmed=True,
+            reason=reason,
+            reason_json=reason_json,
+        )
 
-    def process_track(
-        self,
-        track_id: int,
-        cx: float,
-        cy: float,
-        frame_idx: int,
-        fps: float,
-        frame_w: int,
-        frame_h: int,
-    ) -> list[AlertEvent]:
-        st = self._states.setdefault(track_id, _TrackAlertState())
-        in_roi = self._roi_contains(cx, cy, frame_w, frame_h)
-
-        # 折返：速度向量与上一段点积为负
-        if st.prev_cx is not None and st.prev_cy is not None:
-            dx = cx - st.prev_cx
-            dy = cy - st.prev_cy
-            if st.vx_prev is not None and st.vy_prev is not None:
-                dot = dx * st.vx_prev + dy * st.vy_prev
-                n0 = math.hypot(dx, dy)
-                n1 = math.hypot(st.vx_prev, st.vy_prev)
-                if n0 > 2.0 and n1 > 2.0 and dot < 0:
-                    st.reversal_count += 1
-            st.vx_prev, st.vy_prev = dx, dy
-        st.prev_cx, st.prev_cy = cx, cy
-
-        fps = max(fps, 1e-3)
-
-        if self.cfg.simple_intrusion_mode:
-            # 与提前预警对照：进入 ROI 边沿即告警（仍受冷却约束）
-            if in_roi and not st.in_roi_prev and self._cooldown_ok(st):
-                st.last_alert_monotonic = time.monotonic()
-                st.in_roi_prev = in_roi
-                return [
-                    AlertEvent(
-                        level="alert",
-                        alert_type="intrusion_simple",
-                        frame_idx=frame_idx,
-                        track_id=track_id,
-                        is_confirmed=True,
-                        detail="ROI edge intrusion (simple mode)",
-                    )
-                ]
-            st.in_roi_prev = in_roi
-            return []
-
-        # 提前预警：基于停留与折返
-        if in_roi:
-            st.dwell_roi_frames += 1
+    @staticmethod
+    def _level_for(event: CompoundEventData) -> str:
+        risk = int(event.rule.risk_level or 2)
+        camera_risk = int(event.rule.camera_risk_level or 2)
+        non_auth = bool(event.reason_json.get("non_authorized_time"))
+        identity = event.reason_json.get("identity") or {}
+        identity_status = str(identity.get("identity_status") or "unknown")
+        authorization_status = str(identity.get("authorization_status") or "unknown")
+        authorized_rule_ids = set(identity.get("authorized_rule_ids") or [])
+        authorized_all_rules = bool(identity.get("authorized_all_rules"))
+        is_rule_authorized = authorized_all_rules or (event.rule.id in authorized_rule_ids if event.rule.id is not None else authorization_status == "authorized")
+        if identity_status == "blacklist":
+            identity_weight = 3
+        elif authorization_status in {"not_authorized", "unknown"} or not is_rule_authorized:
+            identity_weight = 2
         else:
-            st.dwell_roi_frames = 0
-            st.reversal_count = 0
+            identity_weight = 0
+        event_weight = {
+            "illegal_intrusion": 3,
+            "tailgating": 3,
+            "reverse_direction": 2,
+            "suspicious_loitering": 2,
+            "gathering": 1,
+            "abnormal_path": 1,
+        }.get(event.event_type, 1)
+        score = max(risk, camera_risk) + event_weight + identity_weight + (1 if non_auth else 0)
+        if score >= 8:
+            return "critical"
+        if score >= 6:
+            return "high"
+        if score >= 4:
+            return "medium"
+        return "low"
 
-        st.in_roi_prev = in_roi
-        dwell_sec = st.dwell_roi_frames / fps
-
-        warn_cond = dwell_sec >= self.cfg.dwell_warning_sec
-        alert_cond = dwell_sec >= self.cfg.dwell_alert_sec or st.reversal_count >= self.cfg.reversal_alert_k
-
-        if warn_cond:
-            st.consec_warning += 1
-        else:
-            st.consec_warning = 0
-
-        if alert_cond:
-            st.consec_alert += 1
-        else:
-            st.consec_alert = 0
-
-        m = self.cfg.consecutive_frames_for_escalation
-        out: list[AlertEvent] = []
-
-        # 高等级优先
-        if st.consec_alert >= m and self._cooldown_ok(st):
-            st.last_alert_monotonic = time.monotonic()
-            st.consec_alert = 0
-            st.consec_warning = 0
-            detail = (
-                f"dwell={dwell_sec:.2f}s rev={st.reversal_count}"
-                f" (alert>={self.cfg.dwell_alert_sec}s or rev>={self.cfg.reversal_alert_k})"
-            )
-            out.append(
-                AlertEvent(
-                    level="alert",
-                    alert_type="early_loitering",
-                    frame_idx=frame_idx,
-                    track_id=track_id,
-                    is_confirmed=True,
-                    detail=detail,
-                )
-            )
-            return out
-
-        if st.consec_warning >= m and self._cooldown_ok(st):
-            st.last_alert_monotonic = time.monotonic()
-            st.consec_warning = 0
-            out.append(
-                AlertEvent(
-                    level="warning",
-                    alert_type="early_dwell",
-                    frame_idx=frame_idx,
-                    track_id=track_id,
-                    is_confirmed=True,
-                    detail=f"dwell={dwell_sec:.2f}s (warning>={self.cfg.dwell_warning_sec}s)",
-                )
-            )
-            return out
-
-        return out
+    @staticmethod
+    def _reason_text(event: CompoundEventData, level: str) -> str:
+        params = event.reason_json.get("parameters") or {}
+        identity = event.reason_json.get("identity") or {}
+        dwell = params.get("dwell_sec")
+        time_desc = "非授权时段" if event.reason_json.get("non_authorized_time") else "授权或普通时段"
+        person_name = identity.get("person_name") or "未知人员"
+        auth_status = identity.get("authorization_status") or "unknown"
+        dwell_text = f"，停留 {dwell}s" if dwell is not None else ""
+        return (
+            f"目标 {event.track_id} 于摄像头 {event.camera_id or '离线任务'} 的"
+            f"「{event.rule.name}」触发 {event.event_type}{dwell_text}，"
+            f"规则类型为 {event.rule.rule_type}，区域风险 {event.rule.risk_level}，"
+            f"身份为 {person_name}（授权状态 {auth_status}），{time_desc}，"
+            f"综合判定为 {level} 级告警。"
+        )

@@ -4,9 +4,10 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Send, Bot, User, Sparkles, Copy, ThumbsUp,
   ThumbsDown, Clock, AlertTriangle, Shield, Camera,
-  Fingerprint, Lightbulb
+  Map, Lightbulb
 } from 'lucide-react';
 import { Sidebar, Header } from '@/components/Sidebar';
+import { sendAssistantMessage } from '@/lib/api';
 
 interface Message {
   id: string;
@@ -22,7 +23,7 @@ const quickQuestions = [
   { icon: Shield, text: '今日安全态势如何？', color: 'cyan' },
   { icon: AlertTriangle, text: '有哪些待处理的告警？', color: 'amber' },
   { icon: Camera, text: '查看摄像头在线状态', color: 'emerald' },
-  { icon: Fingerprint, text: '今日人员通行统计', color: 'purple' },
+  { icon: Map, text: '如何配置禁区和门口规则？', color: 'purple' },
 ];
 
 // 建议操作
@@ -71,36 +72,27 @@ export default function AssistantPage() {
     setInputValue('');
     setIsTyping(true);
 
-    // 模拟AI响应
-    setTimeout(() => {
-      const responses = [
-        {
-          content: '根据当前数据分析：\n\n• 系统整体运行正常，健康度99.8%\n• 今日共产生23条告警，其中5条紧急告警已处理\n• 摄像头在线率92%，4台设备离线\n• 人员通行记录正常，无异常行为\n\n建议关注仓库周界摄像头的离线状态。',
-          suggestions: ['查看离线摄像头列表', '生成详细报告', '设置告警通知']
-        },
-        {
-          content: '当前待处理告警共8条：\n\n1. 东门周界 - 入侵检测（紧急）\n2. 1号楼大堂 - 黑名单人员出现（高危）\n3. 停车场A区 - 人员聚集预警（中等）\n4. 仓库区 - 火焰检测（紧急）\n5. 其他4条低优先级告警\n\n需要我帮您处理这些告警吗？',
-          suggestions: ['开始处理告警', '查看告警详情', '批量标记误报']
-        },
-        {
-          content: '好的，正在为您生成报告...\n\n报告概要：\n• 生成时间：' + new Date().toLocaleString('zh-CN') + '\n• 报告周期：今日0:00 - 现在\n• 系统状态：正常运行\n\n报告已生成完毕，需要我展示详细内容吗？',
-          suggestions: ['展示完整报告', '下载PDF版本', '发送至邮箱']
-        }
-      ];
-
-      const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-      
+    try {
+      const response = await sendAssistantMessage(userMessage.content);
       const assistantMessage: Message = {
         id: `assistant-${messageIdCounter.current++}`,
         role: 'assistant',
-        content: randomResponse.content,
+        content: response.answer,
         timestamp: new Date(),
-        suggestions: randomResponse.suggestions
+        suggestions: response.suggestions,
       };
-
       setMessages(prev => [...prev, assistantMessage]);
+    } catch (e) {
+      setMessages(prev => [...prev, {
+        id: `assistant-${messageIdCounter.current++}`,
+        role: 'assistant',
+        content: e instanceof Error ? `助手接口调用失败：${e.message}` : '助手接口调用失败',
+        timestamp: new Date(),
+        suggestions: ['检查后端服务', '重新登录', '查看系统状态'],
+      }]);
+    } finally {
       setIsTyping(false);
-    }, 1500);
+    }
   };
 
   const handleSuggestionClick = (suggestion: string) => {

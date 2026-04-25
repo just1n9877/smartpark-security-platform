@@ -32,6 +32,14 @@ export function keyframeToUrl(keyframePath: string | null | undefined): string |
   return `${getApiBase()}/media/${rel}`;
 }
 
+export function evidenceToUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const normalized = path.replace(/\\/g, '/');
+  const storageIndex = normalized.indexOf('/storage/');
+  const rel = storageIndex >= 0 ? normalized.slice(storageIndex + '/storage/'.length) : normalized.replace(/^storage\//, '');
+  return `${getApiBase()}/media/${rel}`;
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const base = getApiBase();
   const headers = new Headers(init.headers);
@@ -73,16 +81,36 @@ export async function loginApi(username: string, password: string): Promise<void
   setStoredToken(data.access_token);
 }
 
+export async function registerApi(username: string, email: string, password: string): Promise<void> {
+  await apiFetch<UserPublic>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ username, email, password }),
+  });
+}
+
 export type ApiAlert = {
   id: number;
   job_id: number | null;
   level: string;
   alert_type: string;
+  rule_id: number | null;
+  compound_event_id: number | null;
   triggered_at: string;
   track_id: number | null;
   camera_id: number | null;
   keyframe_path: string | null;
+  evidence_clip_path: string | null;
+  reason: string | null;
+  reason_json: Record<string, unknown> | null;
   is_confirmed: boolean;
+  feedback?: ApiFeedback | null;
+  correlations?: {
+    id: number;
+    related_alert_id: number | null;
+    camera_id: number | null;
+    relation_type: string;
+    details?: Record<string, unknown> | null;
+  }[];
   /** 轨迹统计特征（与流水线 trajectory_analytics 一致） */
   trajectory_features?: Record<string, number> | null;
   /** IsolationForest + GRU-AE 推理结果 */
@@ -133,12 +161,17 @@ export type ApiCamera = {
   id: number;
   name: string;
   rtsp_url: string | null;
+  location: string | null;
+  risk_level: number;
+  is_active: boolean;
   notes: string | null;
   created_at: string;
 };
 
 export type FeedbackLabel =
+  | 'true_alert'
   | 'false_positive'
+  | 'uncertain'
   | 'delivery'
   | 'visitor'
   | 'work'
@@ -148,7 +181,103 @@ export type FeedbackLabel =
 export type UserPublic = {
   id: number;
   username: string;
+  email: string | null;
   role: 'admin' | 'guard';
+};
+
+export type ApiFeedback = {
+  id: number;
+  alert_id: number;
+  user_id: number;
+  label: FeedbackLabel;
+  note: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+export type ApiJob = {
+  id: number;
+  video_path: string;
+  camera_id: number | null;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  error_message: string | null;
+  created_at: string;
+  trajectory_points_count?: number;
+  trajectory_summaries_count?: number;
+  alerts_count?: number;
+};
+
+export type SceneRule = {
+  id: number;
+  camera_id: number | null;
+  name: string;
+  rule_type: 'area' | 'line_crossing' | 'door' | 'direction' | 'object_proximity' | string;
+  geometry: Record<string, unknown>;
+  risk_level: number;
+  is_enabled: boolean;
+  schedule_json: Record<string, unknown> | null;
+  allowed_direction: string | null;
+  dwell_threshold_sec: number;
+  config_json: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type SceneRulePayload = Omit<SceneRule, 'id' | 'created_at'>;
+
+export type Person = {
+  id: number;
+  name: string;
+  person_type: 'employee' | 'visitor' | 'contractor' | 'blacklist' | 'unknown' | string;
+  employee_no: string | null;
+  email: string | null;
+  phone: string | null;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  face_profiles: {
+    id: number;
+    person_id: number;
+    image_path: string;
+    quality_score: number;
+    is_active: boolean;
+    created_at: string;
+  }[];
+  authorizations: {
+    id: number;
+    person_id: number;
+    rule_id: number | null;
+    camera_id: number | null;
+    schedule_json: Record<string, unknown> | null;
+    is_enabled: boolean;
+    created_at: string;
+  }[];
+};
+
+export type RecognitionLog = {
+  id: number;
+  job_id: number | null;
+  camera_id: number | null;
+  track_id: number | null;
+  person_id: number | null;
+  confidence: number;
+  status: string;
+  snapshot_path: string | null;
+  created_at: string;
+};
+
+export type TrackIdentity = {
+  id: number;
+  job_id: number | null;
+  camera_id: number | null;
+  track_id: number;
+  person_id: number | null;
+  identity_status: string;
+  authorization_status: string;
+  confidence: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  evidence_path: string | null;
+  details_json: Record<string, unknown> | null;
 };
 
 export type PipelineSettingsBlock = {
@@ -247,4 +376,101 @@ export async function fetchDashboardMetrics(): Promise<DashboardMetrics> {
 
 export async function fetchAlertTrajectory(alertId: number): Promise<AlertTrajectory> {
   return apiFetch<AlertTrajectory>(`/alerts/${alertId}/trajectory`);
+}
+
+export async function fetchCameras(): Promise<ApiCamera[]> {
+  return apiFetch<ApiCamera[]>('/cameras');
+}
+
+export async function createCamera(body: {
+  name: string;
+  rtsp_url?: string | null;
+  location?: string | null;
+  risk_level?: number;
+  is_active?: boolean;
+  notes?: string | null;
+}): Promise<ApiCamera> {
+  return apiFetch<ApiCamera>('/cameras', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchSceneRules(cameraId?: number): Promise<SceneRule[]> {
+  const qs = cameraId ? `?camera_id=${cameraId}` : '';
+  return apiFetch<SceneRule[]>(`/scene-rules${qs}`);
+}
+
+export async function createSceneRule(body: SceneRulePayload): Promise<SceneRule> {
+  return apiFetch<SceneRule>('/scene-rules', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchPersons(): Promise<Person[]> {
+  return apiFetch<Person[]>('/face/persons');
+}
+
+export async function createPerson(body: {
+  name: string;
+  person_type: string;
+  employee_no?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  notes?: string | null;
+  is_active?: boolean;
+}): Promise<Person> {
+  return apiFetch<Person>('/face/persons', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function uploadFaceProfile(personId: number, file: File): Promise<Person['face_profiles'][number]> {
+  const form = new FormData();
+  form.append('file', file);
+  return apiFetch<Person['face_profiles'][number]>(`/face/persons/${personId}/faces`, {
+    method: 'POST',
+    body: form,
+  });
+}
+
+export async function createPersonAuthorization(body: {
+  person_id: number;
+  rule_id?: number | null;
+  camera_id?: number | null;
+  schedule_json?: Record<string, unknown> | null;
+  is_enabled?: boolean;
+}): Promise<Person['authorizations'][number]> {
+  return apiFetch<Person['authorizations'][number]>('/face/authorizations', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchRecognitionLogs(): Promise<RecognitionLog[]> {
+  return apiFetch<RecognitionLog[]>('/face/recognition-logs');
+}
+
+export async function fetchTrackIdentities(): Promise<TrackIdentity[]> {
+  return apiFetch<TrackIdentity[]>('/face/track-identities');
+}
+
+export async function sendAssistantMessage(message: string): Promise<{ answer: string; suggestions: string[]; source: string }> {
+  return apiFetch<{ answer: string; suggestions: string[]; source: string }>('/assistant/chat', {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
+}
+
+export async function uploadJob(file: File, cameraId?: number | null): Promise<{ id: number; video_path: string; status: string }> {
+  const form = new FormData();
+  form.append('file', file);
+  if (cameraId != null) form.append('camera_id', String(cameraId));
+  return apiFetch<{ id: number; video_path: string; status: string }>('/jobs', { method: 'POST', body: form });
+}
+
+export async function runJob(jobId: number): Promise<{ job_id: number; status: string; video_path?: string }> {
+  return apiFetch<{ job_id: number; status: string; video_path?: string }>(`/jobs/${jobId}/run`, { method: 'POST' });
 }

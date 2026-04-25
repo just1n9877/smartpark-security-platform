@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.auth_core import authenticate_user, create_access_token
+from app.auth_core import authenticate_user, create_access_token, hash_password
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import User
-from app.schemas import LoginRequest, TokenResponse, UserPublic
+from app.models import User, UserRole
+from app.schemas import LoginRequest, RegisterRequest, TokenResponse, UserPublic
 
 router = APIRouter()
 
@@ -20,6 +20,26 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
         )
     token = create_access_token(str(user.id))
     return TokenResponse(access_token=token)
+
+
+@router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
+def register(body: RegisterRequest, db: Session = Depends(get_db)) -> User:
+    username = body.username.strip()
+    email = body.email.strip().lower()
+    if db.query(User).filter(User.username == username).first() is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
+    if db.query(User).filter(User.email == email).first() is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
+    user = User(
+        username=username,
+        email=email,
+        hashed_password=hash_password(body.password),
+        role=UserRole.guard,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 @router.get("/me", response_model=UserPublic)

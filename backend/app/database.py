@@ -28,14 +28,48 @@ def ensure_sqlite_migrations() -> None:
     if not str(engine.url).startswith("sqlite"):
         return
     insp = inspect(engine)
-    if "alerts" not in insp.get_table_names():
+    tables = set(insp.get_table_names())
+    if "users" in tables:
+        _sqlite_add_column("users", "email VARCHAR(255)")
+    if "cameras" in tables:
+        _sqlite_add_column("cameras", "location VARCHAR(255)")
+        _sqlite_add_column("cameras", "risk_level INTEGER DEFAULT 2")
+        _sqlite_add_column("cameras", "is_active INTEGER DEFAULT 1")
+    if "analysis_jobs" in tables:
+        _sqlite_add_column("analysis_jobs", "camera_id INTEGER")
+    if "trajectory_points" in tables:
+        _sqlite_add_column("trajectory_points", "camera_id INTEGER")
+    if "trajectory_summaries" in tables:
+        _sqlite_add_column("trajectory_summaries", "camera_id INTEGER")
+    if "feedbacks" in tables:
+        _sqlite_add_column("feedbacks", "updated_at DATETIME")
+    if "persons" in tables:
+        _sqlite_add_column("persons", "employee_no VARCHAR(64)")
+        _sqlite_add_column("persons", "email VARCHAR(255)")
+        _sqlite_add_column("persons", "phone VARCHAR(64)")
+        _sqlite_add_column("persons", "notes TEXT")
+        _sqlite_add_column("persons", "is_active INTEGER DEFAULT 1")
+    if "track_identities" in tables:
+        _sqlite_add_column("track_identities", "authorization_status VARCHAR(32) DEFAULT 'unknown'")
+        _sqlite_add_column("track_identities", "evidence_path VARCHAR(1024)")
+        _sqlite_add_column("track_identities", "details_json TEXT")
+    if "alerts" not in tables:
         return
     cols = {c["name"] for c in insp.get_columns("alerts")}
     if "job_id" not in cols:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE alerts ADD COLUMN job_id INTEGER"))
+    alert_cols = [
+        ("rule_id", "INTEGER"),
+        ("compound_event_id", "INTEGER"),
+        ("evidence_clip_path", "VARCHAR(1024)"),
+        ("reason", "TEXT"),
+        ("reason_json", "TEXT"),
+    ]
+    for name, typ in alert_cols:
+        _sqlite_add_column("alerts", f"{name} {typ}")
 
-    if "trajectory_summaries" in insp.get_table_names():
+    if "trajectory_summaries" in tables:
         tcols = {c["name"] for c in insp.get_columns("trajectory_summaries")}
         if "ml_scores_json" not in tcols:
             with engine.begin() as conn:

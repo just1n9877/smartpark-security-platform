@@ -3,12 +3,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Shield, Lock, User, Eye, EyeOff, ArrowRight, AlertCircle } from 'lucide-react';
-import { loginApi } from '@/lib/api';
+import { loginApi, registerApi } from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mode, setMode] = useState<'login' | 'register'>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -93,8 +95,8 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username || !password) {
-      setError('请输入用户名和密码');
+    if (!username || !password || (mode === 'register' && !email)) {
+      setError(mode === 'register' ? '请输入用户名、邮箱和密码' : '请输入用户名和密码');
       return;
     }
     
@@ -102,6 +104,9 @@ export default function LoginPage() {
     setError('');
 
     try {
+      if (mode === 'register') {
+        await registerApi(username, email, password);
+      }
       await loginApi(username, password);
       router.push('/dashboard');
     } catch (e) {
@@ -165,6 +170,23 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {mode === 'register' && (
+            <div className="group">
+              <div className="relative">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-cyan-400 transition-colors">
+                  <User className="w-5 h-5" />
+                </div>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="请输入邮箱，用于后续找回密码"
+                  className="w-full pl-12 pr-4 py-4 rounded-2xl bg-slate-800/50 border border-slate-700/50 text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/20 transition-all"
+                />
+              </div>
+            </div>
+          )}
+
           {/* 密码 */}
           <div className="group">
             <div className="relative">
@@ -203,7 +225,7 @@ export default function LoginPage() {
             className="relative w-full py-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-emerald-500 text-white font-medium text-lg overflow-hidden group disabled:opacity-70 transition-all hover:shadow-lg hover:shadow-cyan-500/25"
           >
             <span className={`flex items-center justify-center gap-2 ${isLoading ? 'opacity-0' : ''}`}>
-              登录系统
+              {mode === 'register' ? '注册并登录' : '登录系统'}
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </span>
             {isLoading && (
@@ -223,6 +245,16 @@ export default function LoginPage() {
               忘记密码？
             </button>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setMode(mode === 'login' ? 'register' : 'login');
+              setError('');
+            }}
+            className="w-full text-sm text-slate-400 hover:text-cyan-300 transition-colors"
+          >
+            {mode === 'login' ? '没有账号？立即注册' : '已有账号？返回登录'}
+          </button>
         </form>
 
         {/* 底部信息 */}

@@ -3,7 +3,7 @@
 import { useState, createContext, useContext, useEffect, ReactNode } from 'react';
 import Link from 'next/link';
 import {
-  Shield, Camera, AlertTriangle, Fingerprint, MessageSquare, BarChart3, HardDrive, LogOut, Settings,
+  Shield, Camera, AlertTriangle, Fingerprint, MessageSquare, BarChart3, HardDrive, LogOut, Settings, Map,
   ChevronLeft, ChevronRight, Grid3X3, TrendingUp, TrendingDown, Menu, X
 } from 'lucide-react';
 import { clearAuth } from '@/lib/api';
@@ -132,6 +132,7 @@ const navItems = [
   { icon: Grid3X3, label: '仪表盘', href: '/dashboard' },
   { icon: Camera, label: '实时监控', href: '/monitor' },
   { icon: AlertTriangle, label: '告警中心', href: '/alerts' },
+  { icon: Map, label: '场景规则', href: '/rules' },
   { icon: Fingerprint, label: '人脸识别', href: '/face' },
   { icon: MessageSquare, label: 'AI助手', href: '/assistant' },
   { icon: HardDrive, label: '设备管理', href: '/devices' },

@@ -7,6 +7,7 @@ from app.deps import get_current_user
 from app.model_training import schedule_retrain_after_feedback
 from app.models import (
     Alert,
+    AlertCorrelation,
     AnalysisJob,
     Feedback,
     FeedbackLabel,
@@ -83,11 +84,37 @@ def _enrich_alerts(db: Session, alerts: list[Alert]) -> list[AlertDetail]:
     out: list[AlertDetail] = []
     for a in alerts:
         base = AlertDetail.model_validate(a)
+        latest_feedback = (
+            db.query(Feedback)
+            .filter(Feedback.alert_id == a.id)
+            .order_by(Feedback.updated_at.desc(), Feedback.created_at.desc())
+            .first()
+        )
+        correlations = (
+            db.query(AlertCorrelation)
+            .filter(AlertCorrelation.primary_alert_id == a.id)
+            .order_by(AlertCorrelation.id.asc())
+            .all()
+        )
+        extra = {
+            "feedback": FeedbackOut.model_validate(latest_feedback) if latest_feedback else None,
+            "correlations": [
+                {
+                    "id": c.id,
+                    "related_alert_id": c.related_alert_id,
+                    "camera_id": c.camera_id,
+                    "relation_type": c.relation_type,
+                    "details": c.details_json,
+                }
+                for c in correlations
+            ],
+        }
         s = smap.get((a.job_id, a.track_id)) if a.job_id is not None and a.track_id is not None else None
         if s is not None:
             out.append(
                 base.model_copy(
                     update={
+                        **extra,
                         "trajectory_features": s.features_json,
                         "ml_scores": s.ml_scores_json,
                         "ai_combined_score": _ai_combined_from_ml(s.ml_scores_json),
@@ -95,7 +122,7 @@ def _enrich_alerts(db: Session, alerts: list[Alert]) -> list[AlertDetail]:
                 )
             )
         else:
-            out.append(base)
+            out.append(base.model_copy(update=extra))
     return out
 
 
@@ -104,12 +131,15 @@ def list_alerts(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     level: str | None = Query(None, description="按告警级别筛选，如 info / warning / critical"),
+    camera_id: int | None = Query(None),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> list[AlertDetail]:
     q = db.query(Alert).order_by(Alert.triggered_at.desc())
     if level:
         q = q.filter(Alert.level == level.strip())
+    if camera_id is not None:
+        q = q.filter(Alert.camera_id == camera_id)
     rows = q.offset(skip).limit(limit).all()
     return _enrich_alerts(db, rows)
 
@@ -187,12 +217,15 @@ def submit_feedback(
 
     existing = (
         db.query(Feedback)
-        .filter(Feedback.alert_id == alert_id, Feedback.user_id == user.id)
+        .filter(Feedback.alert_id == alert_id)
         .first()
     )
     if existing:
         existing.label = body.label
         existing.note = body.note
+        from datetime import datetime, timezone
+
+        existing.updated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(existing)
         fb = existing

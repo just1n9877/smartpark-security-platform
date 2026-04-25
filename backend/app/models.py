@@ -29,7 +29,9 @@ class TrainingRunStatus(str, enum.Enum):
 
 
 class FeedbackLabel(str, enum.Enum):
+    true_alert = "true_alert"
     false_positive = "false_positive"
+    uncertain = "uncertain"
     delivery = "delivery"
     visitor = "visitor"
     work = "work"
@@ -37,11 +39,35 @@ class FeedbackLabel(str, enum.Enum):
     other = "other"
 
 
+class AlertLevel(str, enum.Enum):
+    critical = "critical"
+    high = "high"
+    medium = "medium"
+    low = "low"
+
+
+class SceneRuleType(str, enum.Enum):
+    area = "area"
+    line_crossing = "line_crossing"
+    door = "door"
+    direction = "direction"
+    object_proximity = "object_proximity"
+
+
+class PersonType(str, enum.Enum):
+    employee = "employee"
+    visitor = "visitor"
+    contractor = "contractor"
+    blacklist = "blacklist"
+    unknown = "unknown"
+
+
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(Enum(UserRole, native_enum=False), default=UserRole.guard)
     created_at: Mapped[datetime] = mapped_column(
@@ -51,18 +77,78 @@ class User(Base):
     feedbacks: Mapped[list[Feedback]] = relationship("Feedback", back_populates="user")
 
 
+class Person(Base):
+    __tablename__ = "persons"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128))
+    person_type: Mapped[str] = mapped_column(String(32), default=PersonType.employee.value, index=True)
+    employee_no: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    face_profiles: Mapped[list[FaceProfile]] = relationship(
+        "FaceProfile", back_populates="person", cascade="all, delete-orphan"
+    )
+    authorizations: Mapped[list[PersonAuthorization]] = relationship(
+        "PersonAuthorization", back_populates="person", cascade="all, delete-orphan"
+    )
+
+
+class FaceProfile(Base):
+    __tablename__ = "face_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    person_id: Mapped[int] = mapped_column(ForeignKey("persons.id", ondelete="CASCADE"), index=True)
+    image_path: Mapped[str] = mapped_column(String(1024))
+    embedding_json: Mapped[list] = mapped_column(JSON)
+    quality_score: Mapped[float] = mapped_column(Float, default=0.0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    person: Mapped[Person] = relationship("Person", back_populates="face_profiles")
+
+
+class PersonAuthorization(Base):
+    __tablename__ = "person_authorizations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    person_id: Mapped[int] = mapped_column(ForeignKey("persons.id", ondelete="CASCADE"), index=True)
+    rule_id: Mapped[int | None] = mapped_column(ForeignKey("scene_rules.id", ondelete="CASCADE"), nullable=True, index=True)
+    camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id", ondelete="CASCADE"), nullable=True, index=True)
+    schedule_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    person: Mapped[Person] = relationship("Person", back_populates="authorizations")
+
+
 class Camera(Base):
     __tablename__ = "cameras"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128))
     rtsp_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    risk_level: Mapped[int] = mapped_column(Integer, default=2)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
 
     alerts: Mapped[list[Alert]] = relationship("Alert", back_populates="camera")
+    scene_rules: Mapped[list[SceneRule]] = relationship("SceneRule", back_populates="camera")
+    jobs: Mapped[list[AnalysisJob]] = relationship("AnalysisJob", back_populates="camera")
 
 
 class AnalysisJob(Base):
@@ -70,6 +156,7 @@ class AnalysisJob(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     video_path: Mapped[str] = mapped_column(String(1024))
+    camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id"), nullable=True, index=True)
     status: Mapped[JobStatus] = mapped_column(Enum(JobStatus, native_enum=False), default=JobStatus.pending)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     frame_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -78,6 +165,7 @@ class AnalysisJob(Base):
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
 
+    camera: Mapped[Camera | None] = relationship("Camera", back_populates="jobs")
     alerts: Mapped[list[Alert]] = relationship("Alert", back_populates="job")
     trajectory_points: Mapped[list[TrajectoryPoint]] = relationship(
         "TrajectoryPoint", back_populates="job", cascade="all, delete-orphan"
@@ -92,6 +180,7 @@ class TrajectoryPoint(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     job_id: Mapped[int] = mapped_column(ForeignKey("analysis_jobs.id", ondelete="CASCADE"), index=True)
+    camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id"), nullable=True, index=True)
     frame_idx: Mapped[int] = mapped_column(Integer, index=True)
     track_id: Mapped[int] = mapped_column(Integer, index=True)
     cx: Mapped[float] = mapped_column(Float)
@@ -108,11 +197,121 @@ class TrajectorySummary(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     job_id: Mapped[int] = mapped_column(ForeignKey("analysis_jobs.id", ondelete="CASCADE"), index=True)
+    camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id"), nullable=True, index=True)
     track_id: Mapped[int] = mapped_column(Integer, index=True)
     features_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     ml_scores_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     job: Mapped[AnalysisJob] = relationship("AnalysisJob", back_populates="trajectory_summaries")
+
+
+class SceneRule(Base):
+    __tablename__ = "scene_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    rule_type: Mapped[str] = mapped_column(String(32), index=True)
+    geometry: Mapped[dict] = mapped_column(JSON)
+    risk_level: Mapped[int] = mapped_column(Integer, default=2)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    schedule_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    allowed_direction: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    dwell_threshold_sec: Mapped[float] = mapped_column(Float, default=8.0)
+    config_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    camera: Mapped[Camera | None] = relationship("Camera", back_populates="scene_rules")
+
+
+class ZoneTopology(Base):
+    __tablename__ = "zone_topology"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    zone_a_id: Mapped[int] = mapped_column(ForeignKey("scene_rules.id", ondelete="CASCADE"), index=True)
+    zone_b_id: Mapped[int] = mapped_column(ForeignKey("scene_rules.id", ondelete="CASCADE"), index=True)
+    time_window_sec: Mapped[float] = mapped_column(Float, default=30.0)
+    relation_type: Mapped[str] = mapped_column(String(64), default="adjacent")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class TargetTrack(Base):
+    __tablename__ = "target_tracks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    global_track_id: Mapped[str] = mapped_column(String(128), index=True)
+    camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id"), nullable=True, index=True)
+    local_track_id: Mapped[int] = mapped_column(Integer, index=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("analysis_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class TrackIdentity(Base):
+    __tablename__ = "track_identities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("analysis_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id"), nullable=True, index=True)
+    track_id: Mapped[int] = mapped_column(Integer, index=True)
+    person_id: Mapped[int | None] = mapped_column(ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True)
+    identity_status: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
+    authorization_status: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime)
+    evidence_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    details_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class FaceRecognitionLog(Base):
+    __tablename__ = "face_recognition_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("analysis_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id"), nullable=True, index=True)
+    track_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    person_id: Mapped[int | None] = mapped_column(ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
+    snapshot_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class AtomicEvent(Base):
+    __tablename__ = "atomic_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("analysis_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id"), nullable=True, index=True)
+    rule_id: Mapped[int | None] = mapped_column(ForeignKey("scene_rules.id", ondelete="SET NULL"), nullable=True, index=True)
+    track_id: Mapped[int] = mapped_column(Integer, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    event_ts: Mapped[float] = mapped_column(Float, index=True)
+    event_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class CompoundEvent(Base):
+    __tablename__ = "compound_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("analysis_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id"), nullable=True, index=True)
+    rule_id: Mapped[int | None] = mapped_column(ForeignKey("scene_rules.id", ondelete="SET NULL"), nullable=True, index=True)
+    track_id: Mapped[int] = mapped_column(Integer, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    event_ts: Mapped[float] = mapped_column(Float, index=True)
+    event_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    reason_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    is_open: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class Alert(Base):
@@ -124,15 +323,41 @@ class Alert(Base):
     )
     level: Mapped[str] = mapped_column(String(32), index=True)
     alert_type: Mapped[str] = mapped_column(String(64), index=True)
+    rule_id: Mapped[int | None] = mapped_column(ForeignKey("scene_rules.id", ondelete="SET NULL"), nullable=True, index=True)
+    compound_event_id: Mapped[int | None] = mapped_column(ForeignKey("compound_events.id", ondelete="SET NULL"), nullable=True, index=True)
     triggered_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     track_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id"), nullable=True, index=True)
     keyframe_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    evidence_clip_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
 
     job: Mapped[AnalysisJob | None] = relationship("AnalysisJob", back_populates="alerts")
     camera: Mapped[Camera | None] = relationship("Camera", back_populates="alerts")
     feedbacks: Mapped[list[Feedback]] = relationship("Feedback", back_populates="alert")
+    correlations: Mapped[list[AlertCorrelation]] = relationship(
+        "AlertCorrelation", foreign_keys="AlertCorrelation.primary_alert_id", back_populates="primary_alert"
+    )
+
+
+class AlertCorrelation(Base):
+    __tablename__ = "alert_correlations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    primary_alert_id: Mapped[int] = mapped_column(ForeignKey("alerts.id", ondelete="CASCADE"), index=True)
+    related_alert_id: Mapped[int | None] = mapped_column(ForeignKey("alerts.id", ondelete="SET NULL"), nullable=True, index=True)
+    camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id"), nullable=True, index=True)
+    relation_type: Mapped[str] = mapped_column(String(64), default="enhancement")
+    details_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+    primary_alert: Mapped[Alert] = relationship(
+        "Alert", foreign_keys=[primary_alert_id], back_populates="correlations"
+    )
 
 
 class SystemConfig(Base):
@@ -206,6 +431,21 @@ class Feedback(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
 
     alert: Mapped[Alert] = relationship("Alert", back_populates="feedbacks")
     user: Mapped[User] = relationship("User", back_populates="feedbacks")
+
+
+class AssistantMessage(Base):
+    __tablename__ = "assistant_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    role: Mapped[str] = mapped_column(String(16))
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
