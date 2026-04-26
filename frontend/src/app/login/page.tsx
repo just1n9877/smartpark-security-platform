@@ -154,22 +154,6 @@ export default function LoginPage() {
           <p className="text-slate-400">智慧园区AI安防系统</p>
         </div>
 
-        {mode === 'login' && (
-          <div className="mb-5 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4 shadow-lg shadow-cyan-500/10">
-            <p className="text-sm text-slate-300 mb-3">还没有账号？注册后即可进入系统体验普通安保账号能力。</p>
-            <button
-              type="button"
-              onClick={() => {
-                setMode('register');
-                setError('');
-              }}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500/90 to-emerald-500/90 text-white font-medium hover:shadow-lg hover:shadow-cyan-500/25 transition-all"
-            >
-              立即注册账号
-            </button>
-          </div>
-        )}
-
         <form onSubmit={handleSubmit} className="space-y-5">
           {/* 用户名 */}
           <div className="group">
@@ -251,19 +235,6 @@ export default function LoginPage() {
               </div>
             )}
           </button>
-
-          {mode === 'login' && (
-            <button
-              type="button"
-              onClick={() => {
-                setMode('register');
-                setError('');
-              }}
-              className="w-full py-3 rounded-2xl border border-emerald-400/50 bg-emerald-400/10 text-emerald-200 font-medium hover:bg-emerald-400/20 hover:border-emerald-300 transition-all"
-            >
-              注册账号
-            </button>
-          )}
 
           {mode === 'login' && (
             <div className="flex items-center justify-between text-sm">
