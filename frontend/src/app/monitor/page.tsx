@@ -1,14 +1,35 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
-import { Camera, Check, Eye, Loader2, Plus, Power, RefreshCw, Search, Video, Wifi, X } from 'lucide-react';
+import { Camera, Check, Eye, Loader2, Maximize2, Plus, Power, RefreshCw, Search, Video, Wifi, X } from 'lucide-react';
 import { Header, Sidebar } from '@/components/Sidebar';
 import { apiFetch, createCamera, fetchCameras, type ApiCamera } from '@/lib/api';
 import { useToast } from '@/components/ui/Toast';
 
 function camerasFetcher() {
   return fetchCameras();
+}
+
+function CameraPreview({ camera, enlarged = false }: { camera: ApiCamera; enlarged?: boolean }) {
+  return (
+    <div className={`relative aspect-video bg-gradient-to-br from-slate-800 to-slate-950 flex items-center justify-center ${enlarged ? 'min-h-[320px]' : ''}`}>
+      <div className="absolute inset-0 opacity-30" style={{
+        backgroundImage: 'linear-gradient(rgba(34, 211, 238, 0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(34, 211, 238, 0.18) 1px, transparent 1px)',
+        backgroundSize: enlarged ? '48px 48px' : '32px 32px',
+      }} />
+      <div className="relative flex flex-col items-center gap-3 text-center px-6">
+        <div className={`${enlarged ? 'w-24 h-24' : 'w-16 h-16'} rounded-2xl bg-slate-900/70 border border-cyan-500/20 flex items-center justify-center`}>
+          <Video className={`${enlarged ? 'w-12 h-12' : 'w-8 h-8'} text-slate-500`} />
+        </div>
+        {enlarged && (
+          <p className="text-sm text-slate-400 max-w-xl">
+            {camera.rtsp_url ? 'RTSP 实时流已由后端拉取分析；浏览器直播放需 HLS/WebRTC 网关支持。' : '该摄像头未配置 RTSP 地址，当前展示监控占位画面。'}
+          </p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function MonitorPage() {
@@ -31,6 +52,17 @@ export default function MonitorPage() {
     const q = query.trim().toLowerCase();
     return (cameras ?? []).filter((c) => !q || c.name.toLowerCase().includes(q) || (c.location ?? '').toLowerCase().includes(q));
   }, [cameras, query]);
+
+  useEffect(() => {
+    if (!selectedCamera) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSelectedCamera(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedCamera]);
 
   async function handleAddCamera() {
     if (!newCamera.name) {
@@ -101,16 +133,24 @@ export default function MonitorPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map((camera) => (
             <div key={camera.id} className="dashboard-card rounded-2xl overflow-hidden">
-              <div className="relative aspect-video bg-gradient-to-br from-slate-800 to-slate-950 flex items-center justify-center">
-                <Video className="w-14 h-14 text-slate-600" />
+              <div className="relative group">
+                <CameraPreview camera={camera} />
                 <div className="absolute top-3 left-3 px-2 py-1 rounded-lg bg-emerald-500/80 text-white text-xs">
                   {camera.is_active ? '已启用' : '已停用'}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedCamera(camera)}
+                  className="absolute top-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/90 text-white text-xs font-medium shadow-lg shadow-cyan-500/20 hover:bg-cyan-400 transition-colors"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  放大查看
+                </button>
                 <div className="absolute bottom-3 right-3 flex gap-2">
-                  <button type="button" onClick={() => setSelectedCamera(camera)} className="p-2 rounded-lg bg-white/20 hover:bg-white/30">
+                  <button type="button" onClick={() => setSelectedCamera(camera)} title="查看详情" className="p-2 rounded-lg bg-white/20 hover:bg-white/30">
                     <Eye className="w-4 h-4 text-white" />
                   </button>
-                  <button type="button" onClick={() => toggleStream(camera, 'start')} className="p-2 rounded-lg bg-white/20 hover:bg-white/30">
+                  <button type="button" onClick={() => toggleStream(camera, 'start')} title="启动分析" className="p-2 rounded-lg bg-white/20 hover:bg-white/30">
                     <Power className="w-4 h-4 text-white" />
                   </button>
                 </div>
@@ -151,9 +191,7 @@ export default function MonitorPage() {
                 <X className="w-5 h-5 text-slate-400" />
               </button>
             </div>
-            <div className="aspect-video bg-black flex items-center justify-center text-slate-500">
-              {selectedCamera.rtsp_url ? 'RTSP 实时流已由后端拉取分析；浏览器直播放需 HLS/WebRTC 网关支持。' : '该摄像头未配置 RTSP 地址，无法查看真实画面。'}
-            </div>
+            <CameraPreview camera={selectedCamera} enlarged />
             <div className="p-4 flex gap-3">
               <button type="button" onClick={() => toggleStream(selectedCamera, 'start')} className="px-4 py-2 rounded-xl bg-emerald-500 text-white">启动分析</button>
               <button type="button" onClick={() => toggleStream(selectedCamera, 'stop')} className="px-4 py-2 rounded-xl bg-slate-700 text-white">停止分析</button>

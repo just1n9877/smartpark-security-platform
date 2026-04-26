@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shield, Lock, User, Eye, EyeOff, ArrowRight, AlertCircle } from 'lucide-react';
+import { Shield, Lock, User, Eye, EyeOff, ArrowRight, AlertCircle, X } from 'lucide-react';
 import { loginApi, registerApi } from '@/lib/api';
 
 export default function LoginPage() {
@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [showPassword, setShowPassword] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
@@ -153,6 +154,22 @@ export default function LoginPage() {
           <p className="text-slate-400">智慧园区AI安防系统</p>
         </div>
 
+        {mode === 'login' && (
+          <div className="mb-5 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4 shadow-lg shadow-cyan-500/10">
+            <p className="text-sm text-slate-300 mb-3">还没有账号？注册后即可进入系统体验普通安保账号能力。</p>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('register');
+                setError('');
+              }}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500/90 to-emerald-500/90 text-white font-medium hover:shadow-lg hover:shadow-cyan-500/25 transition-all"
+            >
+              立即注册账号
+            </button>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-5">
           {/* 用户名 */}
           <div className="group">
@@ -218,7 +235,7 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* 登录按钮 */}
+          {/* 登录/注册按钮 */}
           <button
             type="submit"
             disabled={isLoading}
@@ -235,23 +252,45 @@ export default function LoginPage() {
             )}
           </button>
 
-          {/* 记住我 & 忘记密码 */}
-          <div className="flex items-center justify-between text-sm">
-            <label className="flex items-center gap-2 text-slate-400 cursor-pointer">
-              <input type="checkbox" className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500/50" />
-              <span>记住我</span>
-            </label>
-            <button type="button" className="text-cyan-400 hover:text-cyan-300 transition-colors">
-              忘记密码？
+          {mode === 'login' && (
+            <button
+              type="button"
+              onClick={() => {
+                setMode('register');
+                setError('');
+              }}
+              className="w-full py-3 rounded-2xl border border-emerald-400/50 bg-emerald-400/10 text-emerald-200 font-medium hover:bg-emerald-400/20 hover:border-emerald-300 transition-all"
+            >
+              注册账号
             </button>
-          </div>
+          )}
+
+          {mode === 'login' && (
+            <div className="flex items-center justify-between text-sm">
+              <label className="flex items-center gap-2 text-slate-400 cursor-pointer">
+                <input type="checkbox" className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500/50" />
+                <span>记住我</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowForgotPassword(true)}
+                className="text-cyan-400 hover:text-cyan-300 transition-colors"
+              >
+                忘记密码？
+              </button>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => {
               setMode(mode === 'login' ? 'register' : 'login');
               setError('');
             }}
-            className="w-full text-sm text-slate-400 hover:text-cyan-300 transition-colors"
+            className={`w-full rounded-2xl border transition-all ${
+              mode === 'login'
+                ? 'py-3 text-base font-medium text-cyan-200 border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20'
+                : 'py-3 text-sm text-slate-300 border-slate-700/50 bg-slate-800/40 hover:border-cyan-500/40 hover:text-cyan-300'
+            }`}
           >
             {mode === 'login' ? '没有账号？立即注册' : '已有账号？返回登录'}
           </button>
@@ -271,6 +310,27 @@ export default function LoginPage() {
           animation: 'scan 4s ease-in-out infinite',
         }}
       />
+
+      {showForgotPassword && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-6" onClick={() => setShowForgotPassword(false)}>
+          <div className="w-full max-w-sm rounded-2xl border border-cyan-500/30 bg-slate-900/95 p-6 shadow-2xl shadow-cyan-500/10" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-white">忘记密码</h2>
+              <button type="button" onClick={() => setShowForgotPassword(false)} className="p-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-slate-300 leading-6">请联系管理员重置密码。</p>
+            <button
+              type="button"
+              onClick={() => setShowForgotPassword(false)}
+              className="mt-6 w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 text-white font-medium hover:shadow-lg hover:shadow-cyan-500/25 transition-all"
+            >
+              我知道了
+            </button>
+          </div>
+        </div>
+      )}
 
       <style jsx global>{`
         @keyframes scan {
