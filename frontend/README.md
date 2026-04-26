@@ -1,144 +1,153 @@
-# SmartGuard AI 前端系统说明
+# SmartGuard AI 前端说明
 
-一、项目概述
+## 一、模块定位
 
-这是智慧园区安防系统的管理员前端，基于 Next.js App Router 开发，负责登录注册、告警、监控、场景规则、人脸识别/人员授权、视频分析、AI 助手和系统设置等页面交互。
+前端是智慧园区安防平台的统一操作入口。用户通过这里完成登录注册、查看仪表盘、管理摄像头、提交视频分析、配置场景规则、处理告警、查看数据分析、管理系统参数以及使用 AI 助手。
 
-技术栈如下：
+当前前端基于 Next.js App Router 开发，界面采用深色科技风格，但页面数据尽量从 FastAPI 后端读取，避免只停留在静态演示。
+
+## 二、技术栈
 
 - Next.js 16 + React + TypeScript
-- Tailwind CSS 4 + shadcn/ui
-- Recharts（图表）
-- Lucide React（图标）
+- Tailwind CSS 4
+- shadcn/ui 基础组件
+- Recharts 图表
+- Lucide React 图标
+- SWR 数据刷新
 
----
+## 三、环境变量
 
-二、联调目标
-
-前端目前已经和本项目 FastAPI 后端直连联调，重点覆盖：
-
-1. 登录注册鉴权
-2. 告警列表与反馈
-3. 仪表盘统计
-4. 数据分析和视频任务
-5. 摄像头与场景规则配置
-6. 人脸识别、人员库和授权状态
-7. AI 助手
-
-暂未实现或后端暂缺的能力，会在界面里用占位文案标出来，避免演示时夸大能力。
-
----
-
-三、本地启动
-
-1) 启动后端（8000）：
+复制示例配置：
 
 ```bash
-cd backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-2) 配置前端环境变量：
-
-```bash
-cd frontend
 copy .env.example .env.local
 ```
 
-默认 `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000`。
+核心变量：
 
-3) 安装依赖并启动前端（3000）：
+```text
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+```
+
+如果前端部署在公网，浏览器必须能访问这个 API 地址；同时后端需要在 `CORS_ORIGINS` 中放行前端来源。
+
+## 四、本地开发
+
+先启动后端：
+
+```bash
+cd ../backend
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+再启动前端：
 
 ```bash
 cd frontend
-pnpm install
-pnpm dev
+npm install
+npm run dev
 ```
 
-访问地址：<http://127.0.0.1:3000>
+访问：
 
-默认测试账号：
+```text
+http://127.0.0.1:3000
+```
 
-- `admin` / `admin123`
-- `guard` / `guard123`
+默认账号：
 
----
+- `admin / admin123`
+- `guard / guard123`
 
-四、构建与运行
+## 五、生产构建
 
 ```bash
 cd frontend
-pnpm build
-pnpm start
+npm run build
+npm run start
 ```
 
-如果还要走旧调试入口（`src/server.ts`）：
+如果使用 PM2：
 
 ```bash
-pnpm dev:coze
+pm2 restart smartpark
 ```
 
----
+构建后若页面仍是旧版本，通常是没有重启实际对外服务的进程，或 Nginx/PM2 指向了旧目录。
 
-五、目录结构
+## 六、页面说明
+
+| 路由 | 说明 |
+|------|------|
+| `/login` | 登录、注册、忘记密码提示 |
+| `/dashboard` | 今日告警、摄像头、任务状态和快捷入口 |
+| `/monitor` | 摄像头列表、添加摄像头、监控画面放大查看 |
+| `/alerts` | 告警列表、详情、轨迹、反馈 |
+| `/rules` | 区域、越线、门、方向和敏感点规则配置 |
+| `/face` | 人员库、人脸模板、授权规则和识别记录 |
+| `/analytics` | 告警趋势、反馈统计、Holdout 评测 |
+| `/assistant` | AI 助手问答 |
+| `/devices` | 设备与运行状态展示 |
+| `/settings` | 阈值、反馈统计、ML 策略和系统参数 |
+
+暂未真正接入的能力会在页面中用说明文字标出，避免把占位功能说成已上线能力。
+
+## 七、目录结构
 
 ```text
 src/
-├── app/                 # 路由页面（App Router）
-├── components/          # 业务组件与 UI 组件
-├── constants/           # 业务常量
+├── app/                 # Next.js 页面路由
+├── components/          # 业务组件和 UI 组件
+├── constants/           # 告警级别、状态等常量
 ├── hooks/               # 自定义 hooks
-├── lib/                 # 工具函数
-└── types/               # TypeScript 类型定义
+├── lib/                 # API、工具函数和校验逻辑
+└── types/               # 前端类型定义
 ```
 
----
+## 八、开发约定
 
-六、页面模块
+1. 页面数据优先通过 `src/lib/api.ts` 调后端接口，不在页面里散写 API 地址。
+2. 组件样式优先使用 Tailwind 和现有科技风主题。
+3. 图表统一使用 Recharts。
+4. 提示消息统一走 Toast 系统。
+5. 提交前建议运行类型检查和 lint。
 
-- `/login`：登录/注册页（动画背景、表单校验、邮箱绑定）
-- `/dashboard`：总览卡片、告警摘要、系统状态
-- `/monitor`：实时监控视图
-- `/alerts`：告警列表、详情、反馈
-- `/rules`：场景规则配置（区域、越线、门、方向、敏感点）
-- `/face`：人脸识别、人员库、人脸模板、授权配置、识别记录
-- `/assistant`：AI 助手交互页（调用后端助手 API）
-- `/devices`：设备状态与性能
-- `/settings`：用户、权限、通知和安全设置
-
----
-
-七、开发约定
-
-1. 包管理器统一使用 `pnpm`。  
-2. 基础组件优先复用 `src/components/ui/`（shadcn）。  
-3. TypeScript 保持严格类型，提交前建议跑一遍 `pnpm ts-check`。  
-4. 样式统一用 Tailwind 和现有主题变量，尽量不要混搭写法。  
-5. 业务组件放在 `src/components/`，可复用逻辑优先下沉。
-
----
-
-八、常用命令
+常用命令：
 
 ```bash
-pnpm dev       # 开发环境
-pnpm build     # 生产构建
-pnpm start     # 生产运行
-pnpm lint      # 代码检查
-pnpm ts-check  # 类型检查
+npm run dev       # 开发环境
+npm run build     # 生产构建
+npm run start     # 生产运行
+npm run lint      # 代码检查
+npm run ts-check  # 类型检查
 ```
 
----
+## 九、联调排查
 
-九、补充说明
+### 登录提示 `Failed to fetch`
 
-- 后端 CORS 已放行本地常用端口（比如 `3000`）
-- 侧边栏状态会持久化到 `localStorage`
-- 图表统一使用 Recharts，提示消息统一走 Toast 系统
+先确认后端健康检查：
 
----
+```bash
+curl -s http://127.0.0.1:8000/health
+```
 
-十、相关文档
+如果前端来源是公网 IP 或域名，需要把该来源加入后端 `CORS_ORIGINS`。
 
-- 项目总 README：`../README.md`
+### 页面显示 0 或空列表
+
+新数据库没有任务和告警时，统计为 0 是正常现象。先跑一条视频任务，再刷新仪表盘和数据分析页。
+
+### 线上构建后页面没变化
+
+检查三件事：
+
+1. `git log -1 --oneline` 是否为最新提交。
+2. `npm run build` 是否在实际部署目录执行成功。
+3. PM2、Docker 或 Nginx 是否已经重启并指向该目录。
+
+## 十、相关文档
+
+- 项目总览：`../README.md`
 - 后端说明：`../backend/README.md`
+- 手动验收：`../TESTING.md`

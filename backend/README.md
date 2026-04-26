@@ -1,189 +1,191 @@
-# 后端服务设计与使用说明
+# 后端服务说明
 
-一、模块概述
+## 一、模块定位
 
-后端基于 FastAPI + SQLAlchemy + SQLite，负责园区安防场景下的登录鉴权、告警管理、任务调度和参数配置。
+后端是整个智慧园区安防平台的数据和业务中心，负责登录鉴权、摄像头管理、视频任务调度、轨迹与告警入库、反馈闭环、系统配置和模型管理等能力。前端页面上的主要数据都来自这里。
 
-当前这部分后端主要做了：
+当前后端基于 FastAPI + SQLAlchemy + SQLite 实现，默认数据库路径为：
 
-- 轨迹分析与告警流水线（YOLO + DeepSORT）
-- 异步任务管理（本地视频分析）
-- 预警阈值与去抖参数在线配置（`/settings`）
-- 告警反馈闭环（反馈后可触发 M 值收紧）
+```text
+database/app.db
+```
 
-默认数据库路径：`../database/app.db`
+首次启动时会自动建表。对于旧库中已知缺失字段，服务会在启动时做必要的 SQLite 兼容迁移；当前还没有引入 Alembic。
 
----
+## 二、环境准备
 
-二、环境与安装
-
-环境要求：
+要求：
 
 - Python 3.10+
+- 建议使用虚拟环境
 
-安装说明：
+只启动基础 API：
 
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
-如果要跑完整轨迹流水线（比如 `POST /jobs/run_local_path` 或批处理脚本），还需要在项目根补装依赖：
+如果要跑完整视频分析流水线，还需要在项目根目录安装视觉和轨迹相关依赖：
 
 ```bash
 pip install -r requirements.txt
 pip install -r backend/requirements.txt
 ```
 
----
+## 三、启动方式
 
-三、启动方式
-
-在 `backend` 目录执行：
+从项目根目录启动最稳妥，因为后端会引用根目录下的 `services/`：
 
 ```bash
-cd backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --app-dir backend --reload --host 0.0.0.0 --port 8000
 ```
+
+也可以在 `backend` 目录启动，但需要保证项目根目录在 `PYTHONPATH` 中。
 
 启动后访问：
 
 - API 文档：<http://127.0.0.1:8000/docs>
 - 健康检查：<http://127.0.0.1:8000/health>
+- 静态证据文件：<http://127.0.0.1:8000/media/...>
 
----
+## 四、默认账号
 
-四、数据与口径说明
+| 用户名 | 密码 | 角色 |
+|------|------|------|
+| `admin` | `admin123` | 管理员 |
+| `guard` | `guard123` | 安保人员 |
 
-1. `RepCount` 等健身/重复动作视频，只用于轨迹联调和算法验证。  
-2. 文档里不要把这类数据写成“园区行人行走数据集”。  
-3. 园区演示或上线建议使用自采视频，或明确标注来源的数据。  
-4. 批处理脚本默认读取 `DATASET_VIDEO_ROOT`；未设置时会尝试 `<项目根>/data/RepCount/video/train`。
+密码使用 `bcrypt` 哈希后写入数据库。生产环境部署时应修改默认账号和 `JWT_SECRET`。
 
----
+## 五、核心业务链路
 
-五、流水线参数来源
+1. 前端登录后获取 JWT。
+2. 用户创建摄像头、场景规则或人员授权信息。
+3. 用户上传视频或提交本地视频路径。
+4. 后端创建分析任务，并在后台调用轨迹流水线。
+5. 流水线写入轨迹点、轨迹摘要、关键帧和告警。
+6. 前端查询任务详情、告警列表和统计图表。
+7. 用户对告警提交反馈。
+8. 系统统计误报情况，并在满足条件时自动收紧确认帧数 M。
 
-- 基准配置文件：`config/pipeline_alerts.yaml`
-- 调用 `POST /jobs/run_local_path` 且未传 `config_path` 时，实际生效参数以数据库 `system_configs`（id=1）为准
-- 任务启动日志会输出当前去抖配置（如 `debounce M=`）
+## 六、主要环境变量
 
-参考文档：
+| 变量 | 说明 |
+|------|------|
+| `DATABASE_URL` | 覆盖默认 SQLite 数据库地址 |
+| `JWT_SECRET` | JWT 签名密钥，生产环境必须修改 |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Token 有效期，默认 1440 分钟 |
+| `CORS_ORIGINS` | 额外允许的前端来源，多个地址用逗号分隔 |
+| `DATASET_VIDEO_ROOT` | 批处理脚本默认读取的视频根目录 |
+| `STREAM_DEMO_MAX_FRAMES` | RTSP 演示最大帧数，`0` 表示不限制 |
+
+本地常见端口如 `3000`、`3001`、`5000`、`5173` 已默认放行。公网部署时，需要把实际前端地址加入 `CORS_ORIGINS`。
+
+## 七、核心 API 分组
+
+### 鉴权
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/auth/login` | 登录并返回 token |
+| `POST` | `/auth/register` | 注册普通安保账号 |
+| `GET` | `/auth/me` | 查询当前用户 |
+
+### 视频任务
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/jobs` | 最近任务列表 |
+| `POST` | `/jobs` | 上传视频或登记本地路径 |
+| `POST` | `/jobs/run_local_path` | 直接分析后端可访问的本地视频 |
+| `POST` | `/jobs/{job_id}/run` | 启动已登记任务 |
+| `GET` | `/jobs/{job_id}` | 任务详情、轨迹点数量和告警数量 |
+
+### 告警与反馈
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/alerts` | 告警列表 |
+| `GET` | `/alerts/{id}` | 告警详情 |
+| `GET` | `/alerts/{id}/trajectory` | 告警关联轨迹和叙事说明 |
+| `POST` | `/alerts/{id}/feedback` | 提交或更新告警反馈 |
+
+### 配置与统计
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/settings` | 当前阈值、反馈统计和 ML 策略 |
+| `PATCH` | `/settings` | 管理员修改阈值或恢复 YAML 默认值 |
+| `GET` | `/dashboard/summary` | 仪表盘汇总 |
+| `GET` | `/dashboard/metrics` | 数据分析页指标和评测历史 |
+
+### 管理员能力
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/admin/training/runs` | 训练任务列表 |
+| `POST` | `/admin/training/enqueue` | 入队全量训练 |
+| `GET` | `/admin/models/versions` | 模型版本列表 |
+| `POST` | `/admin/models/activate` | 激活指定模型版本 |
+| `POST` | `/admin/evaluation/run` | 执行 Holdout 评测 |
+| `GET` | `/admin/evaluation/latest` | 最近评测报告 |
+| `POST` | `/admin/streams/{camera_id}/start` | 启动 RTSP worker |
+| `POST` | `/admin/streams/{camera_id}/stop` | 停止 RTSP worker |
+| `GET` | `/admin/streams/active` | 查看当前活跃流 |
+
+## 八、流水线参数
+
+基准参数在：
+
+```text
+config/pipeline_alerts.yaml
+```
+
+通过 API 启动视频任务时，系统会读取 YAML 基线，并合并数据库中 `system_configs` 的生效配置。任务启动日志会打印当前去抖参数，例如：
+
+```text
+debounce M=4
+```
+
+相关说明见：
 
 - `docs/pipeline_alerts.md`
 - `docs/demo_script.md`
 
----
+## 九、常用命令
 
-六、默认账号
-
-| 用户名 | 密码 | 角色 |
-|------|------|------|
-| admin | admin123 | admin |
-| guard | guard123 | guard |
-
-密码使用 `bcrypt` 哈希后存储。
-
----
-
-七、环境变量
-
-| 变量 | 说明 |
-|------|------|
-| `DATABASE_URL` | 覆盖默认 SQLite 路径 |
-| `JWT_SECRET` | JWT 签名密钥（生产必须修改） |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | 令牌有效期（默认 1440） |
-| `CORS_ORIGINS` | 额外允许的浏览器 Origin（逗号分隔），与默认本地端口合并 |
-| `DATASET_VIDEO_ROOT` | 批处理视频根目录 |
-| `STREAM_DEMO_MAX_FRAMES` | RTSP 演示最大帧数，`0` 表示不限制 |
-
----
-
-八、Admin API（需 admin 角色）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/admin/training/runs` | 训练任务列表 |
-| POST | `/admin/training/enqueue` | 入队全量训练（IF + GRU-AE + 多类头） |
-| GET | `/admin/models/versions` | 已存在的 `models/versions/*` |
-| POST | `/admin/models/activate` | body `{"version_id":"v..."}` 回滚/切换 |
-| POST | `/admin/evaluation/run` | Holdout 评测并落库 |
-| GET | `/admin/evaluation/latest` | 最近评测报告 |
-| POST | `/admin/streams/{camera_id}/start` | 启动 RTSP worker（需 `Camera.rtsp_url`） |
-| POST | `/admin/streams/{camera_id}/stop` | 停止 |
-| GET | `/admin/streams/active` | 当前活跃流 |
-
-公开（已登录）：`GET /dashboard/metrics`（评测历史 + 分桶告警）、`GET /alerts/{id}/trajectory`（轨迹叙事与点列）。
-
-ML 阈值与规则去抖参数均在 `GET/PATCH /settings` 的 `unified_ml` / `effective` 中统一维护。
-
----
-
-九、数据库说明
-
-首次启动会自动 `create_all` 建表。若旧库缺少 `alerts.job_id` 列，系统会在启动时尝试 `ALTER TABLE` 补列。目前还没接入 Alembic 迁移。
-
----
-
-十、核心 API
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/auth/me` | 当前用户信息 |
-| GET | `/alerts` | 告警列表（支持 `level`、`skip`、`limit`） |
-| GET | `/alerts/{id}` | 告警详情 |
-| GET | `/alerts/{id}/trajectory` | 轨迹点 + 叙事文案 |
-| POST | `/alerts/{id}/feedback` | 提交反馈并异步更新误报统计 |
-| GET | `/settings` | 查看当前生效阈值与误报统计 |
-| PATCH | `/settings` | admin 修改阈值或恢复 YAML 默认值 |
-| GET | `/dashboard/summary` | 大屏统计汇总 |
-| GET | `/dashboard/metrics` | Holdout 评测历史与分桶告警 |
-| GET | `/jobs` | 最近任务列表 |
-| GET | `/jobs/{job_id}` | 任务详情、轨迹点和告警计数 |
-| POST | `/jobs/run_local_path` | 异步分析本地视频并返回 `job_id` |
-
-静态关键帧目录为项目根 `storage/frames/`，HTTP 访问路径为 `GET /media/frames/...`。
-
----
-
-十一、常用命令
-
-1) curl 测试（bash）
+登录：
 
 ```bash
 TOKEN=$(curl -s -X POST http://127.0.0.1:8000/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"admin123"}' | jq -r .access_token)
+```
 
+提交视频任务：
+
+```bash
 curl -s -X POST http://127.0.0.1:8000/jobs/run_local_path \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"path":"D:/datasets/RepCount/video/train/some.mp4"}'
-
-curl -s http://127.0.0.1:8000/jobs/1 -H "Authorization: Bearer $TOKEN"
+  -d '{"path":"D:/datasets/demo.mp4"}'
 ```
 
-2) 批处理脚本（项目根）
+查询任务：
+
+```bash
+curl -s http://127.0.0.1:8000/jobs/1 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+批处理脚本：
 
 ```bash
 set PYTHONPATH=backend
 python scripts/batch_extract_trajectories.py --root D:\path\to\mp4\folder
 ```
 
----
+## 十、数据口径
 
-十二、阶段2自检建议
-
-- 至少跑通 1 个含行人视频，`TrajectoryPoint` 数量大于 0
-- `TrajectorySummary` 正常写入，宽松阈值下可触发告警
-- `simple_intrusion_mode` 在 true/false 两种模式下行为符合预期
-- 同一 `track_id` 在去抖冷却时间内不会重复告警
-- 文档口径保持一致，不将跨域数据伪装成园区实景数据
-
----
-
-十三、相关文档
-
-- 项目总览：`README.md`
-- 前端说明：`frontend/README.md`
-- Docker 与验收：`docker-compose.yml`、`TESTING.md`
+`RepCount`、`LLSP` 等视频只用于轨迹和算法验证，不应写成园区实拍或园区行人数据。园区演示建议使用自采视频，或明确标注公开数据的正式名称、来源和许可范围。

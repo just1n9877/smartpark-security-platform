@@ -1,204 +1,227 @@
-# P0 手动验证清单（命令版）
+# 手动验收指南
 
-一、使用说明
+这份文档用于跑通项目的主流程。它不是单元测试说明，而是一份可以照着操作的验收清单，适合本地联调、云服务器部署后自检，也适合答辩前快速确认系统状态。
 
-这份文档按 P0 验收主线 1～6 编排，照着跑一遍就能完成一轮最小可验证闭环。默认你已经通过源码方式或 `docker compose up` 把系统拉起来了：
+默认地址：
 
 - 后端：`http://127.0.0.1:8000`
 - 前端：`http://127.0.0.1:3000`
 
-数据口径提醒（很重要）：
+默认账号：
 
-- `RepCount` / `LLSP` 属于健身或重复动作先验数据，只用于流水线验证
-- 不要在文档或答辩里写成“园区行人行走数据集”
-- 园区场景请使用自采视频，或使用 ShanghaiTech Campus 并明确标注引用
+- 管理员：`admin / admin123`
+- 安保人员：`guard / guard123`
 
----
+## 一、启动检查
 
-二、启动环境（阶段5）
-
-1) Docker（推荐新机器）
+### Docker 方式
 
 ```bash
-cd /path/to/智慧园区安防AI管理与仿真平台
+cd /path/to/smartpark-security-platform
 docker compose up --build
 ```
 
-快速确认：
-
-- `curl -s http://127.0.0.1:8000/health`
-- 浏览器打开 `http://127.0.0.1:3000`
-
-视频路径说明（Docker）：
-
-- 把 mp4 放在宿主机 `data/videos/`
-- API 请求里使用容器路径：`/app/data/videos/your.mp4`
-
-2) 源码方式（对照）
+检查服务：
 
 ```bash
-# 终端1
-cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-# 终端2
-cd frontend && pnpm install && pnpm dev
+curl -s http://127.0.0.1:8000/health
 ```
 
----
+浏览器打开 `http://127.0.0.1:3000`，能看到登录页即可。
 
-三、P0 验收步骤
+### 源码方式
 
-### 1) 轨迹：能抽 track，能落库，能查询
-
-前提是你有可检出人物的 mp4（RepCount 片段、自采视频都可以，但要如实标注来源）。
-
-先登录取 token：
+后端：
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/auth/login \
+cd backend
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+前端：
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+如果后端提示找不到 `services`，请从项目根目录启动：
+
+```bash
+python -m uvicorn app.main:app --app-dir backend --reload --host 0.0.0.0 --port 8000
+```
+
+## 二、登录与基础页面
+
+先登录获取 token：
+
+```bash
+TOKEN=$(curl -s -X POST http://127.0.0.1:8000/auth/login \
   -H "Content-Type: application/json" \
-  -d "{\"username\":\"admin\",\"password\":\"admin123\"}"
+  -d '{"username":"admin","password":"admin123"}' | jq -r .access_token)
 ```
 
-拿到 `access_token` 后再提交任务：
+如果没有 `jq`，也可以直接在前端登录，然后用页面完成后续验证。
+
+基础接口检查：
+
+```bash
+curl -s http://127.0.0.1:8000/auth/me -H "Authorization: Bearer $TOKEN"
+curl -s http://127.0.0.1:8000/dashboard/summary -H "Authorization: Bearer $TOKEN"
+```
+
+前端应能打开：
+
+- `/dashboard`：仪表盘
+- `/monitor`：实时监控
+- `/alerts`：告警中心
+- `/analytics`：数据分析
+- `/settings`：系统设置
+
+## 三、视频任务主流程
+
+准备一段可检测到人物的 mp4。Docker 模式建议放在 `data/videos/`，请求路径使用容器路径；源码模式使用本机绝对路径。
+
+Docker 路径示例：
+
+```text
+/app/data/videos/demo.mp4
+```
+
+源码路径示例：
+
+```text
+C:/Users/you/Desktop/demo.mp4
+```
+
+提交任务：
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/jobs/run_local_path \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"path\":\"/app/data/videos/demo.mp4\"}"
+  -d '{"path":"/app/data/videos/demo.mp4"}'
 ```
 
-源码模式下把 `path` 换成本机绝对路径（例如 `D:/datasets/xxx.mp4`）。
-
-轮询任务：
+返回里会有 `job_id`。假设为 `1`，轮询任务：
 
 ```bash
-curl -s "http://127.0.0.1:8000/jobs/1" -H "Authorization: Bearer $TOKEN"
+curl -s http://127.0.0.1:8000/jobs/1 -H "Authorization: Bearer $TOKEN"
 ```
 
 验收看点：
 
-- `trajectory_points_count > 0`（检出到人时）
-- `alerts_count` 根据阈值可能为 0 或更高
+- `status` 最终变为 `completed`
+- `trajectory_points_count > 0` 表示检出了人物轨迹
+- `alerts_count` 可以为 0，取决于视频内容和阈值
+- 后端日志能看到任务启动和去抖参数，例如 `debounce M=...`
 
-说明：P0 这里是“落库或 CSV”，当前以落库为准，CSV 导出不是必做。
+第一次运行 YOLO 可能会下载权重，CPU 环境下推理较慢，属于正常现象。
 
-### 2) 行为：有可解释特征，有提前预警规则
+## 四、告警与证据
 
-- 任务完成后检查摘要（任务详情或库表）
-- `TrajectorySummary.features_json` 应包含位移、速度、折返、ROI 停留等信息
-- 规则来源：`config/pipeline_alerts.yaml`
-- 规则实现：`services/alert_engine.py`
-
-### 3) 告警：分级、去抖、结构化留痕
+查询告警：
 
 ```bash
-curl -s "http://127.0.0.1:8000/alerts?limit=20" -H "Authorization: Bearer $TOKEN"
+curl -s "http://127.0.0.1:8000/alerts?limit=20" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
-验收看点：
+重点检查：
 
-- 告警字段完整（`level`、`alert_type`、`triggered_at`、`track_id`、`keyframe_path`、`job_id`）
-- 能看到分级（如 `warning` / `alert`）
-- 去抖参数在日志中可见（`debounce M=`）
+- 告警字段包含 `level`、`alert_type`、`triggered_at`、`track_id`、`camera_id`、`job_id`
+- 如有关键帧，路径可以通过 `/media/frames/...` 访问
+- 前端告警中心能展开详情，看到原因、证据和反馈入口
 
-关键帧可通过 `http://127.0.0.1:8000/media/frames/...` 访问。
+如果没有告警，不一定是失败。短视频、没有明显停留或没有进入规则区域时，系统可能只生成轨迹不生成告警。
 
-### 4) 闭环：反馈后能看到阈值变化
+## 五、反馈闭环
 
-提交误报反馈：
+对一条告警提交误报反馈。下面以告警 `1` 为例：
 
 ```bash
 curl -s -X POST "http://127.0.0.1:8000/alerts/1/feedback" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"label\":\"false_positive\",\"note\":\"TESTING\"}"
+  -d '{"label":"false_positive","note":"manual-test"}'
 ```
 
-查看设置：
+查看系统设置：
 
 ```bash
-curl -s http://127.0.0.1:8000/settings -H "Authorization: Bearer $TOKEN"
+curl -s http://127.0.0.1:8000/settings \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 验收看点：
 
-- `feedback_rollup` 统计正常
-- 多条误报后可触发 M 异步收紧（见 `docs/demo_script.md`）
-- `PATCH /settings` 与 `reset_to_yaml_defaults` 仅 admin 可用
+- `feedback_rollup` 有统计结果
+- `effective` 显示当前生效阈值
+- `unified_ml` 显示 ML 策略参数
+- 多条误报达到阈值后，后台可自动提高确认帧数 M
 
-前端路径：登录 -> 告警中心反馈 -> 系统设置查看生效 M。
+前端路径为：告警中心提交反馈，然后到系统设置查看反馈统计和阈值。
 
-### 5) 工程：后端、前端、图表、README 都可复现
+## 六、数据分析与评测
+
+数据分析页主要读取：
+
+- `GET /dashboard/summary`
+- `GET /dashboard/metrics`
+
+如果要生成 Holdout 评测记录，可以使用管理员 token 调用：
 
 ```bash
-curl -s http://127.0.0.1:8000/dashboard/summary -H "Authorization: Bearer $TOKEN"
+curl -s -X POST http://127.0.0.1:8000/admin/evaluation/run \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
-验收看点：
+然后刷新前端 `/analytics` 页面，检查评测卡片和图表是否出现数据。
 
-- 返回结构包含 `alerts_by_day_7d` 等字段
-- 页面 `/dashboard`、`/analytics` 可正常展示图表
-- 根目录 `README.md` 提供本地和 Docker 启动方式
+## 七、扩展能力检查
 
-### 6) 数据说明：表述必须诚实
+这些能力不一定每次都要跑，但可以用于完整验收：
 
-检查 `README.md`、`backend/README.md`、`docs/acceptance_p0.md`：
+1. 训练任务：`POST /admin/training/enqueue`，再查 `GET /admin/training/runs`。
+2. 模型版本：`GET /admin/models/versions`，必要时用 `POST /admin/models/activate` 切换。
+3. RTSP 流：摄像头配置 `rtsp_url` 后，调用 `POST /admin/streams/{camera_id}/start`。
+4. 流式去重测试：项目根目录运行 `python tests/test_stream_dedupe.py -v`。
+5. 轨迹可视化：前端告警中心展开带 `job_id` 的告警，查看叙事文案和轨迹折线。
 
-- 不得把 RepCount/LLSP 写成园区行走数据集
-- 界面文案不应出现误导描述
+## 八、数据口径检查
 
----
+答辩和文档中请保持一致口径：
 
-四、可选：Shanghai 子集演示
+- `RepCount`、`LLSP` 是健身或重复动作视频，只用于算法验证。
+- ShanghaiTech Campus 等公开数据可用于校园异常检测演示，但必须写清来源。
+- 不要把公开数据或跨域视频写成“园区实拍”。
+- 若使用自采园区视频，应单独说明采集来源和授权情况。
 
-如果你已经按 `docs/dataset_shanghai.md` 把帧序列转成 `data/videos/demo_shanghai.mp4`，第 1 步可以直接复用。
+## 九、常见问题
 
-路径示例：
+### 1. `File not found`
 
-- 本机：`C:/.../smartpark-security-platform/data/videos/demo_shanghai.mp4`
-- Docker：`/app/data/videos/demo_shanghai.mp4`
+`/jobs/run_local_path` 读取的是后端机器上的路径。Docker 模式要用容器路径，源码模式要用后端进程能访问到的本机路径。
 
-这类数据答辩时请单独标注正式名称和引用，别和 RepCount 或“园区实拍”混称。
+### 2. 前端 `Failed to fetch`
 
----
+先检查后端是否正常：
 
-五、阶段5自检
+```bash
+curl -s http://127.0.0.1:8000/health
+```
 
-| 项目 | 如何检查 |
-|------|------|
-| 新机器可跑通 | 只装 Docker，克隆后执行 `docker compose up --build`，然后跑本文关键命令 |
-| TESTING 覆盖 P0 | 本文三章第 1～6 节与 P0 主线一一对应 |
+如果前端部署在公网域名或 IP，需要把该来源加入后端 `CORS_ORIGINS`。
 
----
+### 3. 页面能打开但没有数据
 
-六、常见问题
+先确认是否已登录，再确认数据库里是否已有视频任务、告警或反馈。新库刚启动时，统计数据为 0 是正常的。
 
-- Docker 内找不到视频：确认文件在 `./data/videos/`，请求体用 `/app/data/videos/文件名.mp4`
-- 第一次 YOLO 很慢：首次会下载权重，后续由 `ultralytics-cache` 复用
-- 跨域报错：后端已放行常见本地端口；如果改了前端端口，需要同步更新 `backend/app/main.py` 的 `allow_origins`
+### 4. 服务器构建后页面还是旧的
 
----
+确认 `git pull` 成功、`npm run build` 成功，并重启了实际对外服务的进程，例如：
 
-七、模型版本 / 重训 / Holdout / RTSP（扩展验收）
-
-前置：`TOKEN` 为 admin 的 Bearer。
-
-1) **统一策略**：`GET /settings` 应含 `unified_ml`（ML 阈值与规则同库）；`PATCH /settings` 可改 `retrain_on_feedback`、`retrain_interval_hours` 等。
-
-2) **手动训练**：`POST /admin/training/enqueue`，然后 `GET /admin/training/runs` 观察 `status` 变为 `completed` 且 `version_id` 非空；`models/versions/<version_id>/` 下应有 `manifest.json`。
-
-3) **回滚**：`POST /admin/models/activate`，body `{"version_id":"v..."}`，再跑一条视频任务，告警详情中 ML 分数应与回滚前版本一致（需重启进程则见 README）。
-
-4) **Holdout 评测**：`POST /admin/evaluation/run`，响应写入 `evaluation_reports`；前端「数据分析」页「Holdout 评测」卡片应出现 FPR；`GET /dashboard/metrics` 返回 `latest_evaluation`。
-
-5) **误报触发重训**：在 `PATCH /settings` 打开 `retrain_on_feedback: true` 后，对某告警提交 `false_positive` 反馈；`retrain_feedback_delay_sec` 秒后 `GET /admin/training/runs` 应出现 `trigger=feedback` 的新记录。
-
-6) **定时重训**：`retrain_interval_hours` 设为 `1`（测试后改回 `0`），等待约 1 小时或临时改代码缩短轮询（生产勿改）；日志中应出现 `trigger=schedule`。
-
-7) **RTSP**：在 `cameras` 表为某摄像头配置 `rtsp_url` 后，`POST /admin/streams/{camera_id}/start`；设置环境变量 `STREAM_DEMO_MAX_FRAMES=500` 可缩短演示；`GET /admin/streams/active` 查看活跃路数；`POST .../stop` 停止。
-
-8) **流式去重单测**（项目根）：`py -3 tests/test_stream_dedupe.py -v`
-
-9) **轨迹可视化**：登录前端「告警中心」，展开任意带 `job_id` 的告警，应看到叙事文案 + 2D 折线图；纯 RTSP 告警可能无轨迹点，仅叙事说明。
+```bash
+pm2 restart smartpark
+```

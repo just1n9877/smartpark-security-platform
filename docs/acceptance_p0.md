@@ -1,169 +1,133 @@
-# P0 验收主线与阶段进度
+# P0 验收说明
 
-一、文档目的
+## 一、文档目的
 
-这份文档把 P0 的 6 条验收要求和当前实现一一对齐，答辩时可以直接说明“做到了什么、做到哪一步、证据在哪”。
+这份文档用于说明项目的 P0 主线完成情况。它关注的是“系统是否形成了可演示、可复现、可解释的安防闭环”，而不是罗列所有代码细节。
 
 当前项目口径：
 
 - 后端：FastAPI + SQLAlchemy + SQLite
-- 前端：Next.js 16 + React（不是 Vue3 + Element Plus）
-- 交付：支持源码启动，也支持 `docker compose` 一键启动（阶段5）
+- 前端：Next.js 16 + React
+- 部署：支持源码启动，也支持 Docker Compose
+- 数据：公开数据和自采数据必须明确区分
 
----
+## 二、P0 主线概览
 
-二、阶段总览（1～5）
+| 主线 | 当前结论 | 证据位置 |
+|------|------|------|
+| 轨迹抽取、落库和查询 | 已完成主流程 | `services/pipeline_runner.py`、`GET /jobs/{id}` |
+| 行为特征和提前预警 | 已完成基础能力 | `TrajectorySummary.features_json`、`config/pipeline_alerts.yaml` |
+| 告警分级、去抖和留痕 | 已完成 | `alerts` 表、关键帧、`/alerts` API |
+| 反馈闭环和策略变化 | 已完成可演示闭环 | `/alerts/{id}/feedback`、`/settings` |
+| 工程可复现 | 已完成 | `README.md`、`TESTING.md`、`docker-compose.yml` |
+| 数据说明诚实 | 已完成 | README、测试文档、数据集说明 |
 
-### 阶段1（历史快照）
+## 三、逐项说明
 
-| 验收项 | 结论 |
-|------|------|
-| 轨迹抽取与查询 | 未闭环（当时只有表结构） |
-| 行为特征与预警条件 | 未完成 |
-| 告警分级与结构化字段 | 部分完成（去抖未做） |
-| 反馈闭环与阈值变化 | 部分完成（仅 API + 表） |
-| 工程完整性 | 部分完成（后端+DB+README） |
-| 数据口径诚实 | 已完成 |
+### 1. 轨迹主线
 
-### 阶段2（流水线落地）
+系统通过视频任务触发轨迹流水线，检测和跟踪结果会写入数据库。任务完成后，可以通过 `GET /jobs/{id}` 查看轨迹点数量、摘要数量和告警数量。
 
-| 验收项 | 结论 |
-|------|------|
-| 轨迹抽取与查询 | 部分完成（轨迹点入库 + 批处理） |
-| 行为特征与提前预警 | 部分完成（特征 + 规则已接入） |
-| 告警分级与去抖 | 部分完成（冷却 + 连续确认帧） |
-| 反馈后策略变化 | 当时暂未闭环 |
-| 工程完整性 | 部分完成（前端图表待阶段3） |
-| 数据口径诚实 | 已完成 |
+当前以“落库查询”作为验收方式。CSV 导出不是 P0 必做项，后续可以作为数据分析增强。
 
-### 阶段3（前端联调）
+验收看点：
 
-| 验收项 | 结论 |
-|------|------|
-| 登录联调 | 已完成（`POST /auth/login`） |
-| 告警与反馈 | 已完成（列表/详情/提交反馈） |
-| 仪表盘与分析页 | 已完成（真实接口） |
-| CORS 与环境变量 | 已完成 |
-| 文案口径 | 已完成（未误标数据） |
+- 视频任务能从 `pending/running` 进入 `completed`
+- 检出人物时 `trajectory_points_count > 0`
+- 轨迹数据带有 `job_id`、`track_id` 和坐标信息
 
-### 阶段4（反馈闭环）
+### 2. 行为特征与提前预警
 
-| 验收项 | 结论 |
-|------|------|
-| 滚动误报统计 | 已完成（`GET /settings`） |
-| 高误报自动收紧 M | 已完成（`SystemConfig` 自动调参） |
-| 设置 API | 已完成（`GET/PATCH /settings`） |
-| 反馈后异步重算 | 已完成 |
-| 演示文档 | 已完成（`docs/demo_script.md`） |
-| 数据口径诚实 | 已完成 |
+轨迹摘要中保留位移、速度、折返、ROI 停留等可解释特征。告警不是单帧触发，而是结合停留时间、折返次数、方向和区域规则进行判断。
 
-### 阶段5（容器化交付）
+相关文件：
 
-| 验收项 | 结论 |
-|------|------|
-| 后端/前端 Dockerfile | 已完成 |
-| compose 多服务与挂载 | 已完成 |
-| 一键启动与 README | 已完成 |
-| 命令级测试文档 | 已完成（`TESTING.md`） |
-| 数据口径一致性 | 已完成 |
-
----
-
-三、按 P0 主线逐条对照
-
-## 1) 轨迹：抽 track、落库/CSV、可查询
-
-- 阶段1：表结构就绪，但流程未打通
-- 阶段2：通过 `services/tracking_pipeline.py`、`services/pipeline_runner.py`、`scripts/batch_extract_trajectories.py` 打通轨迹入库
-- 当前结论：以“落库”完成验收，CSV 导出仍是可选增强
-
-## 2) 行为：至少两类可解释特征 + 提前预警
-
-- 已支持位移、速度、折返、ROI 停留等特征（`TrajectorySummary.features_json`）
-- 提前预警规则配置在 `config/pipeline_alerts.yaml`
-- 规则分支实现在 `services/alert_engine.py`
-
-## 3) 告警：分级 + 去抖 + 结构化留痕
-
-- 告警结构化字段齐全（级别、类型、时间、摄像头、track、关键帧、job）
-- 去抖策略已接入：`cooldown_sec` + `consecutive_frames_for_escalation`
-- 关键帧落在 `storage/frames/`，并可通过 `/media/frames/...` 访问
-
-## 4) 闭环：反馈写库 + 反馈后策略变化
-
-- `POST /alerts/{id}/feedback` 已接入并写入 `Feedback`
-- 前端 `/alerts` 页面支持提交反馈
-- 阶段4 已完成“误报高 -> 自动 M+1”的可演示闭环
-- `GET/PATCH /settings` 支持查看/调整/恢复默认参数
-
-## 5) 工程：后端 + DB + 前端 + 图表 + README
-
-- 后端、数据库、接口和文档已可复现
-- 前端 `dashboard` 和 `analytics` 已接真实数据并展示图表
-- 阶段5 补齐 Docker Compose 一键启动，支持新机器复现
-
-## 6) 数据集说明诚实
-
-- 文档一致声明：RepCount/LLSP 仅用于先验验证，不是园区行走数据
-- 园区演示应使用自采视频，或在公开数据场景里明确引用来源
-- 验收口径与 README、TESTING 文档保持一致
-
----
-
-四、自检结论（维护版）
-
-| 项目 | 阶段1 | 阶段2 | 阶段3 | 阶段4 | 阶段5 |
-|------|------|------|------|------|------|
-| 未虚构园区数据集 | 是 | 是 | 是 | 是 | 是 |
-| 去抖/调参可演示 | 否 | 部分 | 部分 | 是 | 是 |
-| 新机器可一键复现 | 否 | 否 | 否 | 否 | 是 |
-| TESTING 覆盖 P0 | 否 | 否 | 否 | 否 | 是 |
-
----
-
-五、关键文件索引（审计）
-
-### 阶段2关键路径
-
-- `services/tracking_pipeline.py`
 - `services/trajectory_analytics.py`
 - `services/alert_engine.py`
-- `services/pipeline_runner.py`
 - `config/pipeline_alerts.yaml`
-- `scripts/batch_extract_trajectories.py`
-- `backend/app/routers/jobs_routes.py`
-- `backend/app/models.py`
 
-### 阶段3关键路径
+### 3. 告警分级与去抖
 
-- `frontend/src/lib/api.ts`
-- `frontend/src/app/login/page.tsx`
-- `frontend/src/app/alerts/page.tsx`
-- `frontend/src/app/dashboard/page.tsx`
-- `frontend/src/app/analytics/page.tsx`
+告警记录包含级别、类型、时间、摄像头、轨迹、关键帧和任务信息。系统通过冷却时间和连续确认帧减少重复告警。
 
-### 阶段4关键路径
+验收看点：
 
-- `backend/app/system_config_service.py`
-- `backend/app/routers/settings_routes.py`
-- `backend/app/routers/alerts_routes.py`
-- `docs/demo_script.md`
+- 告警列表能通过 `GET /alerts` 查询
+- 关键帧可通过 `/media/frames/...` 访问
+- 日志能看到类似 `debounce M=...` 的去抖参数
 
-### 阶段5关键路径
+### 4. 反馈闭环
 
+用户可以对告警提交反馈。系统会统计最近反馈中的误报比例，当误报比例达到阈值时，自动提高确认帧数 M，从而让后续告警更谨慎。
+
+相关接口：
+
+- `POST /alerts/{id}/feedback`
+- `GET /settings`
+- `PATCH /settings`
+
+这条主线的演示脚本见 `docs/demo_script.md`。
+
+### 5. 工程可复现
+
+项目提供源码启动和 Docker Compose 两种方式。前端页面、后端接口、数据库、视频任务、告警和反馈都可以在一台新机器上复现。
+
+主要入口：
+
+- `README.md`
+- `TESTING.md`
 - `docker-compose.yml`
 - `docker/Dockerfile.backend`
 - `docker/Dockerfile.frontend`
-- `TESTING.md`
 
----
+### 6. 数据口径
 
-六、偏差与说明（诚实口径）
+项目没有把 `RepCount`、`LLSP` 等健身或重复动作视频写成园区实拍数据。若使用 ShanghaiTech Campus 或类似公开数据，需要写清正式名称、来源和许可范围。
 
-1. 数据口径：未出现“把 RepCount/LLSP 写成园区数据”的表述。  
-2. P0“落库或 CSV”：当前以落库完成主线，CSV 导出为可选增强。  
-3. 技术栈差异：前端采用 Next.js，文档已显式说明。  
-4. 闭环状态：反馈 API + 设置 API + 自动调参 + 演示脚本已经构成完整闭环。  
-5. 范围边界：无目标检出时轨迹与告警为空属正常，不视为功能失败。  
-6. 配置生效规则：批处理可固定 YAML；API 任务默认合并 DB 生效参数。  
-7. 阶段5结论：主线已满足验收，其他增强项不影响当前 P0 结论。  
+这条要求不仅是文档要求，也关系到答辩可信度。没有实现的能力不要写成已上线，非园区数据不要包装成园区数据。
+
+## 四、阶段演进
+
+| 阶段 | 主要变化 |
+|------|------|
+| 阶段1 | 完成后端基础表结构和部分接口，主流程尚未闭环 |
+| 阶段2 | 接入轨迹流水线、行为特征、规则和去抖 |
+| 阶段3 | 前端与后端联调，登录、告警、仪表盘和数据分析页接入真实 API |
+| 阶段4 | 完成反馈统计和阈值自动收紧闭环 |
+| 阶段5 | 补齐 Docker、测试文档和一键复现能力 |
+
+## 五、当前边界
+
+1. P0 以轨迹落库为主，CSV 导出为可选增强。
+2. 无目标检出时，轨迹和告警为空是正常结果。
+3. RTSP 浏览器直播放需要 HLS/WebRTC 网关，当前后端侧重点是拉流分析。
+4. 高精度跨摄像头 Re-ID 需要额外模型和现场标定。
+5. 公开数据只用于算法验证或演示，不代表真实园区场景。
+
+## 六、审计索引
+
+### 后端关键路径
+
+- `backend/app/routers/jobs_routes.py`
+- `backend/app/routers/alerts_routes.py`
+- `backend/app/routers/settings_routes.py`
+- `backend/app/system_config_service.py`
+- `backend/app/models.py`
+
+### 流水线关键路径
+
+- `services/tracking_pipeline.py`
+- `services/pipeline_runner.py`
+- `services/trajectory_analytics.py`
+- `services/alert_engine.py`
+- `services/ml_scoring.py`
+
+### 前端关键路径
+
+- `frontend/src/lib/api.ts`
+- `frontend/src/app/login/page.tsx`
+- `frontend/src/app/dashboard/page.tsx`
+- `frontend/src/app/monitor/page.tsx`
+- `frontend/src/app/alerts/page.tsx`
+- `frontend/src/app/analytics/page.tsx`
+- `frontend/src/app/settings/page.tsx`

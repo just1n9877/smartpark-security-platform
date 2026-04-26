@@ -1,225 +1,122 @@
-# SmartGuard AI 安防系统 - 管理员前端
+# 前端开发说明
 
-## 项目概述
+这份文档给参与前端开发或维护的同学使用。它不是产品介绍，而是说明项目结构、页面职责和开发时需要注意的约定。
 
-智慧园区AI安防系统管理员前端，采用深色科技风格设计，提供高端大气、丝滑流畅的交互体验。
+## 一、项目定位
 
-## 技术栈
+`frontend/` 是 SmartGuard AI 的管理端前端，基于 Next.js 16 App Router 开发。页面风格以深色科技感为主，但功能上尽量连接真实后端接口，避免只做静态展示。
 
-- **框架**: Next.js 16 (App Router)
-- **语言**: TypeScript 5
-- **样式**: Tailwind CSS 4 + 自定义科技风 CSS
-- **图标**: Lucide React
-- **字体**: Orbitron (标题), Inter (正文)
-- **图表**: Recharts
-- **组件库**: shadcn/ui
+主要覆盖：
 
-## 项目结构
+- 登录、注册和鉴权状态
+- 仪表盘和数据分析
+- 摄像头与实时监控
+- 场景规则配置
+- 告警列表、详情、轨迹和反馈
+- 人脸识别、人员库和授权状态
+- AI 助手和系统设置
 
-```
+## 二、技术栈
+
+- Next.js 16
+- React + TypeScript
+- Tailwind CSS
+- shadcn/ui
+- Recharts
+- SWR
+- Lucide React
+
+## 三、目录结构
+
+```text
 src/
-├── app/                      # Next.js App Router
-│   ├── alerts/              # 告警中心页面
-│   ├── assistant/           # AI助手页面
-│   ├── dashboard/           # 仪表盘页面
-│   ├── devices/             # 设备管理页面
-│   ├── face/                # 人脸识别页面
-│   ├── login/               # 登录页面
-│   ├── monitor/             # 实时监控页面
-│   └── settings/            # 系统设置页面
-├── components/
-│   ├── charts/              # 图表组件
-│   │   └── index.tsx        # 图表组件库
-│   ├── ui/                  # UI组件
-│   │   ├── TechComponents.tsx # 科技风组件
-│   │   └── Toast.tsx         # Toast通知系统
-│   ├── ClientLayout.tsx      # 客户端布局
-│   └── Sidebar.tsx           # 侧边栏组件
-├── constants/               # 常量定义
-│   └── index.ts             # 告警级别、状态等配置
-├── types/                   # TypeScript类型
-│   └── index.ts             # 全局类型定义
-└── hooks/                   # 自定义Hooks
+├── app/                 # 页面路由
+│   ├── login/           # 登录和注册
+│   ├── dashboard/       # 仪表盘
+│   ├── monitor/         # 实时监控
+│   ├── alerts/          # 告警中心
+│   ├── rules/           # 场景规则
+│   ├── face/            # 人脸识别
+│   ├── analytics/       # 数据分析
+│   ├── assistant/       # AI 助手
+│   ├── devices/         # 设备管理
+│   └── settings/        # 系统设置
+├── components/          # 业务组件和 UI 组件
+├── hooks/               # 自定义 hooks
+├── lib/                 # API 封装和工具函数
+├── constants/           # 常量
+└── types/               # 类型定义
 ```
 
-## 开发规范
+## 四、开发约定
 
-### TypeScript 严格检查
+1. API 请求统一放在 `src/lib/api.ts` 或相关工具文件中，页面不要散写后端地址。
+2. 登录 token 存储逻辑不要重复实现，复用已有封装。
+3. 页面样式优先沿用现有 Tailwind 组合和深色主题。
+4. 图表统一使用 Recharts，保持交互和视觉风格一致。
+5. Toast 提示统一使用全局 Toast 系统。
+6. 新增弹窗、抽屉、菜单等交互时，要考虑关闭按钮和 Esc/遮罩关闭体验。
+7. 没有真实后端能力的地方，必须用清楚的占位文案说明，不能写成已上线能力。
 
-项目要求严格的 TypeScript 类型检查，运行以下命令进行验证：
+## 五、页面职责
+
+### `/login`
+
+负责登录、注册和忘记密码提示。注册入口保留在登录表单底部，注册成功后沿用现有登录流程写入 token。
+
+### `/dashboard`
+
+展示系统总览，包括摄像头数量、今日告警、反馈数量、任务状态和快捷入口。数据来自后端汇总接口。
+
+### `/monitor`
+
+展示摄像头列表，支持添加摄像头、启动分析和监控画面放大查看。浏览器不能直接播放原生 RTSP，真实播放需要 HLS/WebRTC 网关。
+
+### `/alerts`
+
+展示告警列表、告警详情、关键帧、轨迹叙事和反馈状态。反馈提交后应能在系统设置中看到统计变化。
+
+### `/rules`
+
+维护场景规则，包括区域、越线、门、方向和敏感点靠近等类型。
+
+### `/face`
+
+维护人员、照片、人脸模板、授权规则和识别记录。生产级识别准确率依赖后续模型或外部人脸系统接入。
+
+### `/analytics`
+
+展示告警趋势、反馈统计、Holdout 评测和分桶分析。新库中数据为 0 属于正常情况。
+
+### `/settings`
+
+展示和调整阈值、反馈统计、ML 策略和系统参数。管理员能力需要后端鉴权支持。
+
+## 六、常用命令
 
 ```bash
-pnpm ts-check
+npm run dev       # 开发
+npm run build     # 构建
+npm run start     # 生产运行
+npm run lint      # ESLint
+npm run ts-check  # TypeScript 检查
 ```
 
-**类型定义注意事项：**
+## 七、提交前自检
 
-1. **StatCard 组件**：color 属性必须是 `'cyan' | 'amber' | 'emerald' | 'purple'` 字面量类型，不能是普通字符串
-2. **Header 组件**：支持 children prop，可以在标题栏右侧添加自定义操作按钮
-3. **所有 Props 类型**：必须明确定义并导出，避免 any 类型
+建议至少确认：
 
-## 页面结构
+- 登录页 `admin / admin123` 不受影响。
+- 改动页面无控制台明显报错。
+- `npm run ts-check` 通过。
+- `npm run lint` 通过。
+- 文案没有把测试数据写成园区实拍。
 
-### 1. 登录页面 (`/login`)
-- 粒子动画背景
-- 鼠标跟随光效
-- 霓虹发光效果
-- 表单验证
+## 八、部署提醒
 
-### 2. 仪表盘 (`/dashboard`)
-- 实时统计卡片（摄像头、告警、人员、健康度）
-- 实时告警列表（可展开详情）
-- 摄像头状态监控
-- 系统性能指标
-- 快捷操作入口
+线上页面没更新时，优先排查：
 
-### 3. 实时监控 (`/monitor`)
-- 网格/列表视图切换
-- AI检测统计
-- 视频播放控制
-- 添加摄像头弹窗
-
-### 4. 告警中心 (`/alerts`)
-- 多级别告警（紧急/高危/中等/低）
-- 告警状态管理（待处理/处理中/已解决）
-- 批量操作
-- 告警详情展开
-
-### 5. 人脸识别 (`/face`)
-- 人员管理（网格/列表视图）
-- Tab切换（人员/通行记录）
-- 添加人员弹窗
-- 识别置信度展示
-
-### 6. AI助手 (`/assistant`)
-- 智能对话界面
-- 快捷问题
-- AI建议操作
-- 打字机效果
-
-### 7. 设备管理 (`/devices`)
-- 设备状态监控
-- 性能指标（CPU/内存/磁盘）
-- 设备详情展开
-- 筛选和搜索
-
-### 8. 系统设置 (`/settings`)
-- 个人信息管理
-- 用户管理
-- 角色权限
-- 通知设置
-- 安全设置
-
-## 公共组件
-
-### UI组件 (`components/ui/`)
-
-| 组件 | 说明 |
-|------|------|
-| `TechCard` | 科技风卡片，支持 hover/glow 效果 |
-| `StatCard` | 统计卡片，显示数值、趋势、图标 |
-| `Badge` | 徽章组件，支持多种变体 |
-| `StatusDot` | 状态指示器 |
-| `ProgressBar` | 进度条组件 |
-| `EmptyState` | 空状态展示 |
-| `Skeleton` | 骨架屏组件 |
-| `LoadingSpinner` | 加载动画 |
-| `LoadingOverlay` | 全屏加载遮罩 |
-| `Toast` | 通知提示系统 |
-
-### 图表组件 (`components/charts/`)
-
-| 组件 | 说明 |
-|------|------|
-| `AreaChartComponent` | 面积图 |
-| `PieChartComponent` | 饼图/环形图 |
-| `BarChartComponent` | 柱状图 |
-| `LineChartComponent` | 折线图 |
-| `LiveChart` | 实时数据图表（自动更新） |
-
-## 设计特点
-
-- **深色科技风**: 深蓝黑底色 (#030712)
-- **霓虹渐变**: 蓝绿渐变 (#06b6d4 / #10b981)
-- **毛玻璃效果**: backdrop-filter blur
-- **动态光效**: 鼠标跟随光效
-- **丝滑动画**: 悬浮发光、脉冲、扫描线效果
-- **科技网格背景**: 增强科技感
-
-## 类型定义 (`src/types/`)
-
-```typescript
-// 告警类型
-type AlertLevel = 'critical' | 'warning' | 'medium' | 'low';
-type AlertStatus = 'pending' | 'handling' | 'resolved' | 'falseAlarm';
-
-// 摄像头类型
-type CameraStatus = 'online' | 'warning' | 'offline';
-
-// 组件Props类型
-interface AlertRecord { ... }
-interface CameraRecord { ... }
-interface StatData { ... }
-```
-
-## 常量配置 (`src/constants/`)
-
-```typescript
-ALERT_LEVELS      // 告警级别配置（颜色、标签、优先级）
-ALERT_STATUS      // 告警状态配置
-CAMERA_STATUS     // 摄像头状态配置
-THEME_COLORS      // 主题颜色
-ANIMATION         // 动画时长配置
-SPACING           // 间距配置
-```
-
-## 侧边栏功能
-
-- 展开/收缩按钮（带动画）
-- 状态保存到 localStorage
-- 鼠标悬停显示按钮
-- 平滑宽度过渡动画
-- 悬浮显示菜单提示
-
-## Toast 通知系统
-
-```tsx
-import { useToast } from '@/components/ui/Toast';
-
-function MyComponent() {
-  const { toast } = useToast();
-  
-  // 使用
-  toast.success('操作成功', '数据已保存');
-  toast.error('操作失败', '请重试');
-  toast.warning('警告', '请注意');
-  toast.info('提示', '有新消息');
-}
-```
-
-## 运行命令
-
-```bash
-# 开发环境
-pnpm dev
-
-# 构建
-pnpm build
-
-# 生产环境
-pnpm start
-
-# 代码检查
-pnpm lint
-```
-
-## 访问地址
-
-http://${COZE_PROJECT_DOMAIN_DEFAULT}
-
-## 注意事项
-
-- 默认账号: admin / admin123
-- 侧边栏状态会保存到浏览器 localStorage
-- 图表组件使用 Recharts 库
-- Toast 通知系统已全局注册，无需手动引入
+1. 服务器代码是否已 `git pull` 到最新提交。
+2. `npm run build` 是否成功。
+3. PM2/Docker/Nginx 是否重启并指向正确目录。
+4. 浏览器是否需要强制刷新。
