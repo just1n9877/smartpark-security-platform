@@ -1,14 +1,80 @@
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.deepseek_client import DeepSeekError, chat_with_deepseek, is_deepseek_configured
 from app.deps import get_current_user
 from app.models import Alert, AssistantMessage, Camera, SceneRule, User
 from app.schemas import AssistantRequest, AssistantResponse
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _dt(value: object) -> str | None:
+    return value.isoformat() if hasattr(value, "isoformat") else None
+
+
+def _assistant_context(db: Session) -> dict:
+    cameras = db.query(Camera).order_by(Camera.id.asc()).all()
+    active_cameras = [c for c in cameras if c.is_active]
+    enabled_rules = (
+        db.query(SceneRule)
+        .filter(SceneRule.is_enabled.is_(True))
+        .order_by(SceneRule.id.asc())
+        .limit(10)
+        .all()
+    )
+    recent_alerts = db.query(Alert).order_by(Alert.triggered_at.desc()).limit(5).all()
+    alerts_total = db.query(Alert).count()
+    pending_alerts = db.query(Alert).filter(Alert.is_confirmed.is_(False)).count()
+    critical_alerts = db.query(Alert).filter(Alert.level.in_(["critical", "high"])).count()
+
+    return {
+        "summary": {
+            "alerts_total": alerts_total,
+            "pending_alerts": pending_alerts,
+            "critical_or_high_alerts": critical_alerts,
+            "cameras_total": len(cameras),
+            "active_cameras": len(active_cameras),
+            "enabled_rules": db.query(SceneRule).filter(SceneRule.is_enabled.is_(True)).count(),
+        },
+        "active_cameras_sample": [
+            {
+                "id": camera.id,
+                "name": camera.name,
+                "location": camera.location,
+                "risk_level": camera.risk_level,
+                "has_rtsp_url": bool(camera.rtsp_url),
+            }
+            for camera in active_cameras[:8]
+        ],
+        "enabled_rules_sample": [
+            {
+                "id": rule.id,
+                "name": rule.name,
+                "rule_type": rule.rule_type,
+                "camera_id": rule.camera_id,
+                "risk_level": rule.risk_level,
+            }
+            for rule in enabled_rules
+        ],
+        "recent_alerts": [
+            {
+                "id": alert.id,
+                "level": alert.level,
+                "alert_type": alert.alert_type,
+                "camera_id": alert.camera_id,
+                "is_confirmed": alert.is_confirmed,
+                "triggered_at": _dt(alert.triggered_at),
+                "reason": alert.reason,
+            }
+            for alert in recent_alerts
+        ],
+    }
 
 
 def _answer_from_context(message: str, db: Session) -> tuple[str, list[str]]:
@@ -65,7 +131,20 @@ def chat(
     user: User = Depends(get_current_user),
 ) -> AssistantResponse:
     db.add(AssistantMessage(user_id=user.id, role="user", content=body.message))
-    answer, suggestions = _answer_from_context(body.message, db)
+    fallback_answer, suggestions = _answer_from_context(body.message, db)
+    answer = fallback_answer
+    source = "local_rules_no_deepseek_key"
+
+    if is_deepseek_configured():
+        try:
+            answer, deepseek_suggestions = chat_with_deepseek(body.message, _assistant_context(db))
+            suggestions = deepseek_suggestions or suggestions
+            source = "deepseek"
+        except DeepSeekError as exc:
+            logger.warning("DeepSeek assistant fallback: %s", exc)
+            source = "local_rules_deepseek_error"
+            answer = fallback_answer
+
     db.add(AssistantMessage(user_id=user.id, role="assistant", content=answer, created_at=datetime.now(timezone.utc)))
     db.commit()
-    return AssistantResponse(answer=answer, suggestions=suggestions)
+    return AssistantResponse(answer=answer, suggestions=suggestions, source=source)

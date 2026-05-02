@@ -21,27 +21,45 @@ database/app.db
 
 只启动基础 API：
 
+Windows PowerShell：
+
+```powershell
+cd C:\path\to\smartpark-security-platform
+py -m pip install -r backend\requirements.txt
+```
+
+macOS / Linux：
+
 ```bash
-cd backend
-pip install -r requirements.txt
+cd /path/to/smartpark-security-platform
+python -m pip install -r backend/requirements.txt
 ```
 
 如果要跑完整视频分析流水线，还需要在项目根目录安装视觉和轨迹相关依赖：
 
 ```bash
-pip install -r requirements.txt
-pip install -r backend/requirements.txt
+python -m pip install -r requirements.txt
+python -m pip install -r backend/requirements.txt
 ```
 
 ## 三、启动方式
 
-从项目根目录启动最稳妥，因为后端会引用根目录下的 `services/`：
+后端建议从项目根目录启动，便于同时加载 `backend/` 与项目根目录下的 `services/`：
 
-```bash
-python -m uvicorn app.main:app --app-dir backend --reload --host 0.0.0.0 --port 8000
+Windows PowerShell：
+
+```powershell
+cd C:\path\to\smartpark-security-platform
+$env:PYTHONPATH="backend;."
+py -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-也可以在 `backend` 目录启动，但需要保证项目根目录在 `PYTHONPATH` 中。
+macOS / Linux：
+
+```bash
+cd /path/to/smartpark-security-platform
+PYTHONPATH=backend:. python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
 启动后访问：
 
@@ -79,8 +97,18 @@ python -m uvicorn app.main:app --app-dir backend --reload --host 0.0.0.0 --port 
 | `CORS_ORIGINS` | 额外允许的前端来源，多个地址用逗号分隔 |
 | `DATASET_VIDEO_ROOT` | 批处理脚本默认读取的视频根目录 |
 | `STREAM_DEMO_MAX_FRAMES` | RTSP 演示最大帧数，`0` 表示不限制 |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key；配置后 AI 助手优先调用 DeepSeek |
+| `DEEPSEEK_MODEL` | DeepSeek 模型名，默认 `deepseek-chat` |
+| `DEEPSEEK_API_URL` | DeepSeek Chat Completions 地址，默认官方接口 |
+| `DEEPSEEK_TIMEOUT_SEC` | DeepSeek 请求超时时间，默认 30 秒 |
+| `DEEPSEEK_TEMPERATURE` | DeepSeek 回复随机性，默认 `0.3` |
+| `MEDIAMTX_ENABLED` | 是否启用 MediaMTX WebRTC 网关，默认启用 |
+| `MEDIAMTX_API_URL` | 后端访问 MediaMTX API 的地址，默认 `http://127.0.0.1:9997` |
+| `MEDIAMTX_PUBLIC_WEBRTC_URL` | 浏览器访问 MediaMTX WebRTC 的地址，默认 `http://127.0.0.1:8889` |
+| `MEDIAMTX_TIMEOUT_SEC` | MediaMTX API 请求超时时间，默认 5 秒 |
 
 本地常见端口如 `3000`、`3001`、`5000`、`5173` 已默认放行。公网部署时，需要把实际前端地址加入 `CORS_ORIGINS`。
+如果没有配置 `DEEPSEEK_API_KEY`，AI 助手会自动使用本地规则回复，不影响基础功能。
 
 ## 七、核心 API 分组
 
@@ -101,6 +129,16 @@ python -m uvicorn app.main:app --app-dir backend --reload --host 0.0.0.0 --port 
 | `POST` | `/jobs/run_local_path` | 直接分析后端可访问的本地视频 |
 | `POST` | `/jobs/{job_id}/run` | 启动已登记任务 |
 | `GET` | `/jobs/{job_id}` | 任务详情、轨迹点数量和告警数量 |
+
+### 摄像头与实时流
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/cameras` | 摄像头列表 |
+| `POST` | `/cameras` | 添加摄像头 |
+| `POST` | `/cameras/{camera_id}/start` | 启动后端 RTSP 分析 worker |
+| `POST` | `/cameras/{camera_id}/stop` | 停止后端 RTSP 分析 worker |
+| `POST` | `/cameras/{camera_id}/webrtc` | 注册 MediaMTX 路径并返回 WebRTC 播放地址 |
 
 ### 告警与反馈
 
@@ -188,4 +226,4 @@ python scripts/batch_extract_trajectories.py --root D:\path\to\mp4\folder
 
 ## 十、数据口径
 
-`RepCount`、`LLSP` 等视频只用于轨迹和算法验证，不应写成园区实拍或园区行人数据。园区演示建议使用自采视频，或明确标注公开数据的正式名称、来源和许可范围。
+`RepCount`、`LLSP` 等视频适合用于轨迹和算法验证。园区场景演示建议使用自采视频；如使用公开数据，材料中应说明数据集正式名称、来源和许可范围。

@@ -57,6 +57,77 @@ class UserPublic(BaseModel):
     username: str
     email: str | None = None
     role: UserRole
+    full_name: str | None = None
+    phone: str | None = None
+    department: str | None = None
+    title: str | None = None
+    is_active: bool = True
+    created_at: UtcIsoZ | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class UserProfileUpdate(BaseModel):
+    full_name: str | None = Field(default=None, max_length=128)
+    email: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=64)
+    department: str | None = Field(default=None, max_length=128)
+    title: str | None = Field(default=None, max_length=128)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=6, max_length=128)
+
+
+class AdminUserCreate(BaseModel):
+    username: str = Field(..., min_length=3, max_length=64)
+    email: str | None = Field(default=None, max_length=255)
+    password: str = Field(..., min_length=6, max_length=128)
+    role: UserRole = UserRole.guard
+    full_name: str | None = Field(default=None, max_length=128)
+    phone: str | None = Field(default=None, max_length=64)
+    department: str | None = Field(default=None, max_length=128)
+    title: str | None = Field(default=None, max_length=128)
+    is_active: bool = True
+
+
+class AdminUserUpdate(BaseModel):
+    email: str | None = Field(default=None, max_length=255)
+    role: UserRole | None = None
+    full_name: str | None = Field(default=None, max_length=128)
+    phone: str | None = Field(default=None, max_length=64)
+    department: str | None = Field(default=None, max_length=128)
+    title: str | None = Field(default=None, max_length=128)
+    is_active: bool | None = None
+    password: str | None = Field(default=None, min_length=6, max_length=128)
+
+
+class NotificationPreferenceOut(BaseModel):
+    email_enabled: bool
+    sms_enabled: bool
+    app_enabled: bool
+    wechat_enabled: bool
+    updated_at: UtcIsoZ
+
+    model_config = {"from_attributes": True}
+
+
+class NotificationPreferencePatch(BaseModel):
+    email_enabled: bool | None = None
+    sms_enabled: bool | None = None
+    app_enabled: bool | None = None
+    wechat_enabled: bool | None = None
+
+
+class SecurityAuditLogOut(BaseModel):
+    id: int
+    user_id: int | None = None
+    action: str
+    ip_address: str | None = None
+    status: str
+    detail: str | None = None
+    created_at: UtcIsoZ
 
     model_config = {"from_attributes": True}
 
@@ -87,6 +158,51 @@ class CameraOut(BaseModel):
     risk_level: int = 2
     is_active: bool = True
     notes: str | None
+    created_at: UtcIsoZ
+
+    model_config = {"from_attributes": True}
+
+
+class CameraWebRtcOut(BaseModel):
+    camera_id: int
+    path: str
+    page_url: str
+    whep_url: str
+
+
+class DeviceBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    device_type: str = Field(default="server", max_length=32)
+    location: str | None = None
+    status: str = Field(default="online", max_length=32)
+    ip_address: str | None = None
+    cpu_percent: float = Field(default=0.0, ge=0, le=100)
+    memory_percent: float = Field(default=0.0, ge=0, le=100)
+    disk_percent: float = Field(default=0.0, ge=0, le=100)
+    uptime: str | None = None
+    notes: str | None = None
+
+
+class DeviceCreate(DeviceBase):
+    pass
+
+
+class DeviceUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    device_type: str | None = Field(default=None, max_length=32)
+    location: str | None = None
+    status: str | None = Field(default=None, max_length=32)
+    ip_address: str | None = None
+    cpu_percent: float | None = Field(default=None, ge=0, le=100)
+    memory_percent: float | None = Field(default=None, ge=0, le=100)
+    disk_percent: float | None = Field(default=None, ge=0, le=100)
+    uptime: str | None = None
+    notes: str | None = None
+
+
+class DeviceOut(DeviceBase):
+    id: int
+    last_check_at: UtcIsoZ
     created_at: UtcIsoZ
 
     model_config = {"from_attributes": True}

@@ -42,6 +42,21 @@ class Settings:
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
     uploads_dir: Path = _project_root() / "data" / "uploads" / "jobs"
     cors_allow_origins: list[str] = _parse_cors_origins()
+    deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    deepseek_api_url: str = os.getenv(
+        "DEEPSEEK_API_URL",
+        "https://api.deepseek.com/chat/completions",
+    ).strip()
+    deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip()
+    deepseek_timeout_sec: float = float(os.getenv("DEEPSEEK_TIMEOUT_SEC", "30"))
+    deepseek_temperature: float = float(os.getenv("DEEPSEEK_TEMPERATURE", "0.3"))
+    mediamtx_enabled: bool = os.getenv("MEDIAMTX_ENABLED", "true").strip().lower() not in {"0", "false", "no"}
+    mediamtx_api_url: str = os.getenv("MEDIAMTX_API_URL", "http://127.0.0.1:9997").strip().rstrip("/")
+    mediamtx_public_webrtc_url: str = os.getenv(
+        "MEDIAMTX_PUBLIC_WEBRTC_URL",
+        "http://127.0.0.1:8889",
+    ).strip().rstrip("/")
+    mediamtx_timeout_sec: float = float(os.getenv("MEDIAMTX_TIMEOUT_SEC", "5"))
 
 
 settings = Settings()

@@ -16,6 +16,7 @@ interface Message {
   timestamp: Date;
   likes?: number;
   suggestions?: string[];
+  source?: string;
 }
 
 // 快捷问题
@@ -33,6 +34,8 @@ const suggestedActions = [
   '检查设备运行状态',
   '优化识别算法参数',
 ];
+
+const showAssistantSource = process.env.NEXT_PUBLIC_SHOW_ASSISTANT_SOURCE === 'true';
 
 export default function AssistantPage() {
   const [messages, setMessages] = useState<Message[]>([
@@ -80,6 +83,7 @@ export default function AssistantPage() {
         content: response.answer,
         timestamp: new Date(),
         suggestions: response.suggestions,
+        source: response.source,
       };
       setMessages(prev => [...prev, assistantMessage]);
     } catch (e) {
@@ -88,7 +92,7 @@ export default function AssistantPage() {
         role: 'assistant',
         content: e instanceof Error ? `助手接口调用失败：${e.message}` : '助手接口调用失败',
         timestamp: new Date(),
-        suggestions: ['检查后端服务', '重新登录', '查看系统状态'],
+        suggestions: ['重新登录', '查看系统状态', '稍后重试'],
       }]);
     } finally {
       setIsTyping(false);
@@ -157,6 +161,7 @@ export default function AssistantPage() {
                 }`}>
                   <Clock className="w-3 h-3" />
                   <span>{message.timestamp.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+                  {showAssistantSource && message.source && <span>来源：{message.source}</span>}
                 </div>
 
                 {/* 建议操作 */}

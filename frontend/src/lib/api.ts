@@ -40,6 +40,49 @@ export function evidenceToUrl(path: string | null | undefined): string | null {
   return `${getApiBase()}/media/${rel}`;
 }
 
+export class ApiError extends Error {
+  status: number;
+  detail: unknown;
+
+  constructor(status: number, message: string, detail?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+function detailToMessage(detail: unknown): string {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (item && typeof item === 'object' && 'msg' in item) {
+          return String((item as { msg: unknown }).msg);
+        }
+        return JSON.stringify(item);
+      })
+      .join('；');
+  }
+  if (detail && typeof detail === 'object') {
+    return JSON.stringify(detail);
+  }
+  return '';
+}
+
+async function parseErrorResponse(res: Response): Promise<ApiError> {
+  const text = await res.text();
+  if (!text) return new ApiError(res.status, `HTTP ${res.status}`);
+  try {
+    const json = JSON.parse(text) as { detail?: unknown; message?: unknown };
+    const detail = json.detail ?? json.message ?? json;
+    const message = detailToMessage(detail) || `HTTP ${res.status}`;
+    return new ApiError(res.status, message, detail);
+  } catch {
+    return new ApiError(res.status, text || `HTTP ${res.status}`);
+  }
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const base = getApiBase();
   const headers = new Headers(init.headers);
@@ -53,17 +96,16 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
   const res = await fetch(`${base}${path}`, { ...init, headers });
 
-  if (res.status === 401) {
+  if (res.status === 401 || res.status === 403) {
     clearAuth();
     if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
       window.location.href = '/login';
     }
-    throw new Error('Unauthorized');
+    throw new ApiError(res.status, '登录状态已失效，请重新登录');
   }
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    throw await parseErrorResponse(res);
   }
 
   if (res.status === 204) {
@@ -168,6 +210,13 @@ export type ApiCamera = {
   created_at: string;
 };
 
+export type CameraWebRtc = {
+  camera_id: number;
+  path: string;
+  page_url: string;
+  whep_url: string;
+};
+
 export type FeedbackLabel =
   | 'true_alert'
   | 'false_positive'
@@ -183,6 +232,12 @@ export type UserPublic = {
   username: string;
   email: string | null;
   role: 'admin' | 'guard';
+  full_name?: string | null;
+  phone?: string | null;
+  department?: string | null;
+  title?: string | null;
+  is_active?: boolean;
+  created_at?: string | null;
 };
 
 export type ApiFeedback = {
@@ -355,8 +410,145 @@ export type SettingsPatch = {
   stream_alert_merge_sec?: number;
 };
 
+export type PersonPayload = {
+  name?: string;
+  person_type?: string;
+  employee_no?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  notes?: string | null;
+  is_active?: boolean;
+};
+
+export type Device = {
+  id: number;
+  name: string;
+  device_type: string;
+  location: string | null;
+  status: 'online' | 'warning' | 'offline' | string;
+  ip_address: string | null;
+  cpu_percent: number;
+  memory_percent: number;
+  disk_percent: number;
+  uptime: string | null;
+  last_check_at: string;
+  notes: string | null;
+};
+
+export type DevicePayload = {
+  name: string;
+  device_type: string;
+  location?: string | null;
+  status?: string;
+  ip_address?: string | null;
+  cpu_percent?: number;
+  memory_percent?: number;
+  disk_percent?: number;
+  uptime?: string | null;
+  notes?: string | null;
+};
+
+export type UserProfilePayload = {
+  full_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  department?: string | null;
+  title?: string | null;
+};
+
+export type AdminUserPayload = UserProfilePayload & {
+  username?: string;
+  password?: string;
+  role?: 'admin' | 'guard';
+  is_active?: boolean;
+};
+
+export type NotificationPreference = {
+  email_enabled: boolean;
+  sms_enabled: boolean;
+  app_enabled: boolean;
+  wechat_enabled: boolean;
+  updated_at: string;
+};
+
+export type SecurityAuditLog = {
+  id: number;
+  user_id: number | null;
+  action: string;
+  ip_address: string | null;
+  status: string;
+  detail: string | null;
+  created_at: string;
+};
+
 export async function fetchMe(): Promise<UserPublic> {
   return apiFetch<UserPublic>('/auth/me');
+}
+
+export async function updateMe(body: UserProfilePayload): Promise<UserPublic> {
+  return apiFetch<UserPublic>('/auth/me', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function changePassword(body: { current_password: string; new_password: string }): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchUsers(): Promise<UserPublic[]> {
+  return apiFetch<UserPublic[]>('/users');
+}
+
+export async function createUser(body: Required<Pick<AdminUserPayload, 'username' | 'password'>> & AdminUserPayload): Promise<UserPublic> {
+  return apiFetch<UserPublic>('/users', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateUser(userId: number, body: AdminUserPayload): Promise<UserPublic> {
+  return apiFetch<UserPublic>(`/users/${userId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function disableUser(userId: number): Promise<void> {
+  return apiFetch<void>(`/users/${userId}`, { method: 'DELETE' });
+}
+
+export async function fetchNotificationPreference(): Promise<NotificationPreference> {
+  return apiFetch<NotificationPreference>('/users/me/notifications');
+}
+
+export async function patchNotificationPreference(body: Partial<Omit<NotificationPreference, 'updated_at'>>): Promise<NotificationPreference> {
+  return apiFetch<NotificationPreference>('/users/me/notifications', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchSecurityLogs(limit = 50): Promise<SecurityAuditLog[]> {
+  return apiFetch<SecurityAuditLog[]>(`/users/security-logs?limit=${limit}`);
+}
+
+export async function fetchDashboardSummary(): Promise<DashboardSummary> {
+  return apiFetch<DashboardSummary>('/dashboard/summary');
+}
+
+export async function fetchAlerts(limit = 200): Promise<ApiAlert[]> {
+  return apiFetch<ApiAlert[]>(`/alerts?limit=${limit}`);
+}
+
+export async function submitAlertFeedback(alertId: number, body: { label: FeedbackLabel; note?: string | null }): Promise<ApiFeedback> {
+  return apiFetch<ApiFeedback>(`/alerts/${alertId}/feedback`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 export async function fetchSettings(): Promise<SettingsOut> {
@@ -396,6 +588,29 @@ export async function createCamera(body: {
   });
 }
 
+export async function updateCamera(cameraId: number, body: Partial<Omit<ApiCamera, 'id' | 'created_at'>>): Promise<ApiCamera> {
+  return apiFetch<ApiCamera>(`/cameras/${cameraId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteCamera(cameraId: number): Promise<void> {
+  return apiFetch<void>(`/cameras/${cameraId}`, { method: 'DELETE' });
+}
+
+export async function startCameraStream(cameraId: number): Promise<{ camera_id: number; started: boolean }> {
+  return apiFetch<{ camera_id: number; started: boolean }>(`/cameras/${cameraId}/start`, { method: 'POST' });
+}
+
+export async function stopCameraStream(cameraId: number): Promise<{ camera_id: number; stopped: boolean }> {
+  return apiFetch<{ camera_id: number; stopped: boolean }>(`/cameras/${cameraId}/stop`, { method: 'POST' });
+}
+
+export async function prepareCameraWebRtc(cameraId: number): Promise<CameraWebRtc> {
+  return apiFetch<CameraWebRtc>(`/cameras/${cameraId}/webrtc`, { method: 'POST' });
+}
+
 export async function fetchSceneRules(cameraId?: number): Promise<SceneRule[]> {
   const qs = cameraId ? `?camera_id=${cameraId}` : '';
   return apiFetch<SceneRule[]>(`/scene-rules${qs}`);
@@ -406,6 +621,17 @@ export async function createSceneRule(body: SceneRulePayload): Promise<SceneRule
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+export async function updateSceneRule(ruleId: number, body: Partial<SceneRulePayload>): Promise<SceneRule> {
+  return apiFetch<SceneRule>(`/scene-rules/${ruleId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteSceneRule(ruleId: number): Promise<void> {
+  return apiFetch<void>(`/scene-rules/${ruleId}`, { method: 'DELETE' });
 }
 
 export async function fetchPersons(): Promise<Person[]> {
@@ -423,6 +649,13 @@ export async function createPerson(body: {
 }): Promise<Person> {
   return apiFetch<Person>('/face/persons', {
     method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updatePerson(personId: number, body: PersonPayload): Promise<Person> {
+  return apiFetch<Person>(`/face/persons/${personId}`, {
+    method: 'PUT',
     body: JSON.stringify(body),
   });
 }
@@ -449,6 +682,10 @@ export async function createPersonAuthorization(body: {
   });
 }
 
+export async function deletePersonAuthorization(authorizationId: number): Promise<void> {
+  return apiFetch<void>(`/face/authorizations/${authorizationId}`, { method: 'DELETE' });
+}
+
 export async function fetchRecognitionLogs(): Promise<RecognitionLog[]> {
   return apiFetch<RecognitionLog[]>('/face/recognition-logs');
 }
@@ -471,6 +708,36 @@ export async function uploadJob(file: File, cameraId?: number | null): Promise<{
   return apiFetch<{ id: number; video_path: string; status: string }>('/jobs', { method: 'POST', body: form });
 }
 
+export async function fetchJobs(limit = 20): Promise<ApiJob[]> {
+  return apiFetch<ApiJob[]>(`/jobs?limit=${limit}`);
+}
+
+export async function fetchJob(jobId: number): Promise<ApiJob> {
+  return apiFetch<ApiJob>(`/jobs/${jobId}`);
+}
+
 export async function runJob(jobId: number): Promise<{ job_id: number; status: string; video_path?: string }> {
   return apiFetch<{ job_id: number; status: string; video_path?: string }>(`/jobs/${jobId}/run`, { method: 'POST' });
+}
+
+export async function fetchDevices(): Promise<Device[]> {
+  return apiFetch<Device[]>('/devices');
+}
+
+export async function createDevice(body: DevicePayload): Promise<Device> {
+  return apiFetch<Device>('/devices', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateDevice(deviceId: number, body: Partial<DevicePayload>): Promise<Device> {
+  return apiFetch<Device>(`/devices/${deviceId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteDevice(deviceId: number): Promise<void> {
+  return apiFetch<void>(`/devices/${deviceId}`, { method: 'DELETE' });
 }

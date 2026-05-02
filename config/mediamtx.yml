@@ -1,0 +1,9 @@
+api: yes
+apiAddress: :9997
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcAllowOrigin: '*'
+webrtcLocalUDPAddress: :8189
+
+paths: {}

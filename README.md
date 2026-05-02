@@ -4,7 +4,7 @@
 
 本项目面向智慧园区安防管理场景，提供从视频接入、轨迹分析、场景规则、告警分级到误报反馈的完整演示闭环。系统不只展示静态页面，而是把前端操作、后端接口、轨迹流水线和告警数据串在一起，方便在本地或服务器上完成一轮可复现的功能验证。
 
-当前版本已经覆盖登录注册、摄像头管理、视频任务分析、场景规则配置、人脸识别/人员授权、告警中心、数据分析、系统设置和 AI 助手等模块。前端采用 Next.js，不是 Vue3 + Element Plus；后端采用 FastAPI，默认使用 SQLite 便于部署和演示。
+当前版本已经覆盖登录注册、摄像头管理、视频任务分析、场景规则配置、人脸识别/人员授权、告警中心、数据分析、系统设置和 AI 助手等模块。前端采用 Next.js，后端采用 FastAPI，默认使用 SQLite 便于部署和演示。
 
 ## 二、技术架构
 
@@ -51,6 +51,7 @@ docker compose up --build
 
 - 前端页面：<http://127.0.0.1:3000>
 - 后端接口文档：<http://127.0.0.1:8000/docs>
+- WebRTC 播放网关：<http://127.0.0.1:8889>
 - 健康检查：<http://127.0.0.1:8000/health>
 
 Docker 模式下，如果要跑本地视频任务，请把 mp4 放到宿主机 `data/videos/`，接口请求里使用容器路径，例如：
@@ -61,19 +62,30 @@ Docker 模式下，如果要跑本地视频任务，请把 mp4 放到宿主机 `
 
 ### 2. 源码方式
 
-后端：
+后端建议从项目根目录启动，因为后端会引用根目录下的 `services/`、`config/` 等模块。Windows 环境推荐使用 `py -m`，避免 `pip` 或 `uvicorn` 没有加入 PATH 导致启动失败。
 
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+Windows PowerShell：
+
+```powershell
+cd C:\path\to\smartpark-security-platform
+py -m pip install -r backend\requirements.txt
+$env:PYTHONPATH="backend;."
+py -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-如果要运行完整轨迹流水线，还需要在项目根目录安装根依赖：
+macOS / Linux：
 
 ```bash
-pip install -r requirements.txt
-pip install -r backend/requirements.txt
+cd /path/to/smartpark-security-platform
+python -m pip install -r backend/requirements.txt
+PYTHONPATH=backend:. python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+如果要运行完整轨迹流水线，还需要在项目根目录安装视觉与轨迹依赖：
+
+```bash
+python -m pip install -r requirements.txt
+python -m pip install -r backend/requirements.txt
 ```
 
 前端：
@@ -86,6 +98,14 @@ npm run dev
 ```
 
 默认 API 地址为 `http://127.0.0.1:8000`，前端访问地址为 `http://127.0.0.1:3000`。
+源码方式如果要在实时监控页播放 RTSP 画面，需要单独启动 MediaMTX，并设置后端可访问的网关地址：
+
+```powershell
+docker run --rm -p 8889:8889 -p 8189:8189/udp -p 9997:9997 -v ${PWD}\config\mediamtx.yml:/mediamtx.yml:ro bluenviron/mediamtx:1
+
+$env:MEDIAMTX_API_URL="http://127.0.0.1:9997"
+$env:MEDIAMTX_PUBLIC_WEBRTC_URL="http://127.0.0.1:8889"
+```
 
 默认账号：
 
@@ -99,7 +119,7 @@ npm run dev
 最小闭环建议按下面顺序跑：
 
 1. 打开前端并使用 `admin / admin123` 登录。
-2. 在实时监控或设备页面确认摄像头数据可以加载。
+2. 在实时监控页确认摄像头数据可以加载，在设备页面确认 `/devices` 设备数据可以新增和刷新。
 3. 准备一段可检出人物的 mp4，提交视频任务。
 4. 等待任务完成，检查轨迹点、告警数量和关键帧。
 5. 进入告警中心，查看告警等级、原因、轨迹和证据。
@@ -109,20 +129,20 @@ npm run dev
 
 更完整的命令级验证见 `TESTING.md`。
 
-## 六、数据使用说明
+## 六、数据来源与演示说明
 
-项目中涉及的公开数据和样例视频必须如实说明来源。
+本项目支持接入本地视频、公开数据集片段或自采园区视频进行功能演示。为便于复现，建议将演示视频放在本地或服务器数据目录中，仓库仅保留必要的配置、说明和小体积样例文件。
 
-- `RepCount`、`LLSP` 属于健身或重复动作视频，只能用于轨迹流水线和算法验证，不能写成“园区行人行走数据集”。
-- ShanghaiTech Campus 等公开校园异常检测数据可以用于演示，但需要写清正式名称、论文信息、下载来源和许可范围。
-- 如果做园区实际演示，建议使用自采视频，或明确说明数据不是甲方园区实拍。
-- 大体积原始数据不建议提交到 Git，推荐放在本地或服务器数据目录，并在文档中写明路径和来源。
+- `RepCount`、`LLSP` 等公开视频可用于轨迹流水线和算法功能验证。
+- ShanghaiTech Campus 等公开校园异常检测数据可用于异常检测场景演示，使用时应保留数据集名称、论文信息、下载来源和许可说明。
+- 如果用于正式园区场景展示，建议优先使用自采视频，并在演示材料中说明视频来源。
 
-Shanghai 类帧序列转 mp4 的方法见 `docs/dataset_shanghai.md`。
+对于以帧序列形式发布的数据集，演示前可先转换为 mp4 视频文件，再通过平台的视频任务入口进行分析。
 
 ## 七、当前边界
 
-- 浏览器不能直接播放原生 RTSP。后端可以拉流分析，但前端实时播放需要 HLS 或 WebRTC 网关。
+- 浏览器不能直接播放原生 RTSP。当前通过 MediaMTX 将摄像头 RTSP 转为 WebRTC 播放；若摄像头编码为 H265 或带 B 帧的 H264，浏览器可能仍需要额外转码。
+- 设备管理页使用 `/devices` 后端接口维护服务器/网络设备状态；这些状态来自人工录入或外部采集写入，不等同于实时硬件探针。
 - 跨摄像头同一人高精度续接需要 Re-ID 模型和现场拓扑标定；当前版本已保留可扩展结构。
 - 本地人脸识别实现适合演示人员库、授权状态和告警分级闭环；生产环境建议接入企业级人脸系统或更强的人脸模型。
 - 无目标检出时，轨迹点和告警为空是正常结果，不代表接口失败。
@@ -135,5 +155,5 @@ Shanghai 类帧序列转 mp4 的方法见 `docs/dataset_shanghai.md`。
 - P0 验收：`docs/acceptance_p0.md`
 - 告警阈值与去抖：`docs/pipeline_alerts.md`
 - 反馈闭环演示：`docs/demo_script.md`
-- Shanghai 数据接入：`docs/dataset_shanghai.md`
+- 公开数据接入说明：`docs/dataset_shanghai.md`
 - Docker 配置：`docker-compose.yml`、`docker/Dockerfile.backend`、`docker/Dockerfile.frontend`
