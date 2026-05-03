@@ -8,21 +8,21 @@ import {
 } from 'lucide-react';
 import { Sidebar, Header } from '@/components/Sidebar';
 import {
-  apiFetch,
+  fetchAlerts,
   fetchAlertTrajectory,
   keyframeToUrl,
+  submitAlertFeedback,
   type AlertTrajectory,
-  type ApiAlert,
   type FeedbackLabel,
 } from '@/lib/api';
 
-const alertsFetcher = () => apiFetch<ApiAlert[]>('/alerts?limit=200');
+const alertsFetcher = () => fetchAlerts(200);
 
 function trajectoryFetcher(id: number) {
   return () => fetchAlertTrajectory(id);
 }
 
-/** 后端 level → 卡片用 */
+/** 告警级别映射为界面展示样式 */
 function uiLevel(raw: string): 'critical' | 'warning' | 'medium' | 'low' {
   if (raw === 'critical') return 'critical';
   if (raw === 'high') return 'warning';
@@ -82,7 +82,7 @@ export default function AlertsPage() {
   });
 
   const trajKey = expandedAlert ? `alert-traj-${expandedAlert}` : null;
-  const { data: trajData } = useSWR<AlertTrajectory>(
+  const { data: trajData, isLoading: trajLoading, error: trajError } = useSWR<AlertTrajectory>(
     trajKey,
     expandedAlert ? trajectoryFetcher(expandedAlert) : null,
     { revalidateOnFocus: false },
@@ -143,10 +143,7 @@ export default function AlertsPage() {
     setSubmittingId(alertId);
     setFeedbackMsg(null);
     try {
-      await apiFetch(`/alerts/${alertId}/feedback`, {
-        method: 'POST',
-        body: JSON.stringify({ label, note: feedbackNote.trim() || null }),
-      });
+      await submitAlertFeedback(alertId, { label, note: feedbackNote.trim() || null });
       setFeedbackMsg('反馈已保存');
       setFeedbackNote('');
       await mutate();
@@ -184,7 +181,7 @@ export default function AlertsPage() {
       <div className="flex-1 p-6 overflow-y-auto">
         {error && (
           <div className="mb-4 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
-            加载失败：{String(error)}。请确认后端已启动且已登录。
+            加载失败：{String(error)}。请确认已登录，或稍后重试。
           </div>
         )}
 
@@ -344,6 +341,17 @@ export default function AlertsPage() {
                         )}
                       </div>
                     )}
+                    {trajLoading && expandedAlert === alert.id && (
+                      <div className="mt-4 flex items-center gap-2 text-sm text-slate-400">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        加载轨迹详情…
+                      </div>
+                    )}
+                    {trajError && expandedAlert === alert.id && (
+                      <div className="mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-sm text-red-300">
+                        轨迹加载失败：{trajError instanceof Error ? trajError.message : String(trajError)}
+                      </div>
+                    )}
                     {trajData && expandedAlert === alert.id && (
                       <div className="mt-4 space-y-3">
                         <p className="text-xs text-slate-500 font-medium">轨迹叙事（2D 路径 · 坐标与视频分辨率一致）</p>
@@ -439,7 +447,7 @@ export default function AlertsPage() {
           <div className="dashboard-card rounded-2xl p-12 text-center">
             <Bell className="w-12 h-12 text-slate-600 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-slate-400 mb-2">暂无告警</h3>
-            <p className="text-sm text-slate-500">请先在后端提交视频分析任务，或调整筛选条件</p>
+            <p className="text-sm text-slate-500">请先提交视频分析任务，或调整筛选条件</p>
           </div>
         )}
       </div>

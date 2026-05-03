@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from 'react';
 import useSWR from 'swr';
-import { Camera, Check, Loader2, Map, Plus, Route, Shield, Target, X } from 'lucide-react';
+import { Camera, Check, Edit, Loader2, Map, Plus, Route, Shield, Target, Trash2, X } from 'lucide-react';
 import { Header, Sidebar } from '@/components/Sidebar';
 import {
   createSceneRule,
+  deleteSceneRule,
   fetchCameras,
   fetchSceneRules,
+  updateSceneRule,
   type ApiCamera,
   type SceneRule,
 } from '@/lib/api';
@@ -37,9 +39,10 @@ function camerasFetcher() {
 }
 
 export default function RulesPage() {
-  const { data: rules, isLoading, mutate } = useSWR<SceneRule[]>('scene-rules', rulesFetcher);
+  const { data: rules, isLoading, error: loadError, mutate } = useSWR<SceneRule[]>('scene-rules', rulesFetcher);
   const { data: cameras } = useSWR<ApiCamera[]>('rule-cameras', camerasFetcher);
   const [showModal, setShowModal] = useState(false);
+  const [editingRule, setEditingRule] = useState<SceneRule | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -70,12 +73,46 @@ export default function RulesPage() {
     }));
   }
 
+  function resetForm() {
+    setEditingRule(null);
+    setForm({
+      camera_id: '',
+      name: '',
+      rule_type: 'area',
+      risk_level: 3,
+      dwell_threshold_sec: 8,
+      allowed_direction: '',
+      geometry: JSON.stringify(defaultGeometry.area, null, 2),
+    });
+    setError(null);
+  }
+
+  function openCreate() {
+    resetForm();
+    setShowModal(true);
+  }
+
+  function openEdit(rule: SceneRule) {
+    setEditingRule(rule);
+    setForm({
+      camera_id: rule.camera_id != null ? String(rule.camera_id) : '',
+      name: rule.name,
+      rule_type: rule.rule_type,
+      risk_level: rule.risk_level,
+      dwell_threshold_sec: rule.dwell_threshold_sec,
+      allowed_direction: rule.allowed_direction ?? '',
+      geometry: JSON.stringify(rule.geometry ?? {}, null, 2),
+    });
+    setError(null);
+    setShowModal(true);
+  }
+
   async function saveRule() {
     setSaving(true);
     setError(null);
     try {
       const geometry = JSON.parse(form.geometry) as Record<string, unknown>;
-      await createSceneRule({
+      const payload = {
         camera_id: form.camera_id ? Number(form.camera_id) : null,
         name: form.name,
         rule_type: form.rule_type,
@@ -86,22 +123,40 @@ export default function RulesPage() {
         allowed_direction: form.allowed_direction || null,
         dwell_threshold_sec: form.dwell_threshold_sec,
         config_json: { created_from: 'frontend_rules_page' },
-      });
+      };
+      if (editingRule) {
+        await updateSceneRule(editingRule.id, payload);
+      } else {
+        await createSceneRule(payload);
+      }
       setShowModal(false);
-      setForm({
-        camera_id: '',
-        name: '',
-        rule_type: 'area',
-        risk_level: 3,
-        dwell_threshold_sec: 8,
-        allowed_direction: '',
-        geometry: JSON.stringify(defaultGeometry.area, null, 2),
-      });
+      resetForm();
       await mutate();
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function toggleRule(rule: SceneRule) {
+    setError(null);
+    try {
+      await updateSceneRule(rule.id, { is_enabled: !rule.is_enabled });
+      await mutate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '更新失败');
+    }
+  }
+
+  async function removeRule(rule: SceneRule) {
+    if (!window.confirm(`确定删除规则「${rule.name}」吗？`)) return;
+    setError(null);
+    try {
+      await deleteSceneRule(rule.id);
+      await mutate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '删除失败');
     }
   }
 
@@ -119,7 +174,7 @@ export default function RulesPage() {
       >
         <button
           type="button"
-          onClick={() => setShowModal(true)}
+          onClick={openCreate}
           className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500 text-white text-sm font-medium hover:bg-cyan-400 transition-colors"
         >
           <Plus className="w-4 h-4" />
@@ -159,6 +214,12 @@ export default function RulesPage() {
             加载规则…
           </div>
         )}
+        {loadError && (
+          <div className="mb-4 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
+            规则加载失败：{loadError instanceof Error ? loadError.message : String(loadError)}
+          </div>
+        )}
+        {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
 
         <div className="space-y-3">
           {(rules ?? []).map((rule) => (
@@ -179,7 +240,18 @@ export default function RulesPage() {
                     {rule.is_enabled ? ' 已启用' : ' 已停用'}
                   </p>
                 </div>
-                <Camera className="w-5 h-5 text-slate-500" />
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => toggleRule(rule)} className="px-3 py-1.5 rounded-lg bg-slate-700 text-slate-200 text-xs">
+                    {rule.is_enabled ? '停用' : '启用'}
+                  </button>
+                  <button type="button" onClick={() => openEdit(rule)} className="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700">
+                    <Edit className="w-4 h-4 text-cyan-300" />
+                  </button>
+                  <button type="button" onClick={() => removeRule(rule)} className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20">
+                    <Trash2 className="w-4 h-4 text-red-300" />
+                  </button>
+                  <Camera className="w-5 h-5 text-slate-500" />
+                </div>
               </div>
             </div>
           ))}
@@ -195,8 +267,8 @@ export default function RulesPage() {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowModal(false)}>
           <div className="dashboard-card rounded-2xl p-6 max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-bold text-white">新建场景规则</h3>
-              <button type="button" onClick={() => setShowModal(false)} className="p-2 rounded-lg hover:bg-slate-700/50">
+              <h3 className="text-lg font-bold text-white">{editingRule ? '编辑场景规则' : '新建场景规则'}</h3>
+              <button type="button" onClick={() => { setShowModal(false); resetForm(); }} className="p-2 rounded-lg hover:bg-slate-700/50">
                 <X className="w-5 h-5 text-slate-400" />
               </button>
             </div>
@@ -216,7 +288,7 @@ export default function RulesPage() {
             <textarea value={form.geometry} onChange={(e) => setForm({ ...form, geometry: e.target.value })} className="mt-4 w-full min-h-40 rounded-xl bg-slate-900/80 border border-slate-700/50 text-slate-200 text-sm p-3 font-mono" />
             {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
             <div className="flex justify-end gap-3 mt-4">
-              <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 rounded-xl bg-slate-700 text-white">取消</button>
+              <button type="button" onClick={() => { setShowModal(false); resetForm(); }} className="px-5 py-2.5 rounded-xl bg-slate-700 text-white">取消</button>
               <button type="button" onClick={saveRule} disabled={saving || !form.name} className="px-5 py-2.5 rounded-xl bg-cyan-500 text-white disabled:opacity-50 flex items-center gap-2">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                 保存

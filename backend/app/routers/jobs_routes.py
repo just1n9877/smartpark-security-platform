@@ -2,30 +2,48 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import Alert, AnalysisJob, JobStatus, TrajectoryPoint, TrajectorySummary, User
-from app.schemas import JobDetail, JobOut, RunLocalPathBody
+from app.schemas import JobDetail, RunLocalPathBody
 
 router = APIRouter()
 
 
-@router.get("", response_model=list[JobOut])
+def _job_detail(db: Session, job: AnalysisJob) -> JobDetail:
+    ntp = db.query(TrajectoryPoint).filter(TrajectoryPoint.job_id == job.id).count()
+    nts = db.query(TrajectorySummary).filter(TrajectorySummary.job_id == job.id).count()
+    na = db.query(Alert).filter(Alert.job_id == job.id).count()
+    return JobDetail(
+        id=job.id,
+        video_path=job.video_path,
+        camera_id=job.camera_id,
+        status=job.status,
+        error_message=job.error_message,
+        created_at=job.created_at,
+        trajectory_points_count=ntp,
+        trajectory_summaries_count=nts,
+        alerts_count=na,
+    )
+
+
+@router.get("", response_model=list[JobDetail])
 def list_jobs(
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> list[AnalysisJob]:
-    return (
+) -> list[JobDetail]:
+    jobs = (
         db.query(AnalysisJob)
         .order_by(AnalysisJob.created_at.desc())
         .limit(limit)
         .all()
     )
+    return [_job_detail(db, job) for job in jobs]
 
 
 def _enqueue_pipeline(job_id: int, video_path: str) -> None:
@@ -76,13 +94,18 @@ async def create_job(
                 detail="multipart field 'file' is required",
             )
         upload = file
-        assert isinstance(upload, UploadFile)
+        upload_file = getattr(upload, "file", None)
+        if upload_file is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid upload file",
+            )
         upload_dir = settings.project_root / "storage" / "videos" / "jobs"
         upload_dir.mkdir(parents=True, exist_ok=True)
-        suffix = Path(upload.filename or "video").suffix or ".mp4"
+        suffix = Path(getattr(upload, "filename", None) or "video").suffix or ".mp4"
         dest = upload_dir / f"{uuid.uuid4().hex}{suffix}"
         with dest.open("wb") as out:
-            shutil.copyfileobj(upload.file, out)
+            shutil.copyfileobj(upload_file, out)
         raw_camera_id = form.get("camera_id")
         camera_id = int(raw_camera_id) if raw_camera_id not in (None, "") else None
         job = AnalysisJob(video_path=str(dest.resolve()), camera_id=camera_id, status=JobStatus.pending)
@@ -145,16 +168,4 @@ def get_job(
     job = db.query(AnalysisJob).filter(AnalysisJob.id == job_id).first()
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
-    ntp = db.query(TrajectoryPoint).filter(TrajectoryPoint.job_id == job_id).count()
-    nts = db.query(TrajectorySummary).filter(TrajectorySummary.job_id == job_id).count()
-    na = db.query(Alert).filter(Alert.job_id == job_id).count()
-    return JobDetail(
-        id=job.id,
-        video_path=job.video_path,
-        status=job.status,
-        error_message=job.error_message,
-        created_at=job.created_at,
-        trajectory_points_count=ntp,
-        trajectory_summaries_count=nts,
-        alerts_count=na,
-    )
+    return _job_detail(db, job)

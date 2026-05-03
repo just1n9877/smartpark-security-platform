@@ -9,11 +9,11 @@ import {
   Grid3X3, List, Check, X, Loader2,
 } from 'lucide-react';
 import { Sidebar, Header, StatCard } from '@/components/Sidebar';
-import { apiFetch, type ApiAlert, type ApiCamera, type DashboardSummary } from '@/lib/api';
+import { fetchAlerts, fetchCameras, fetchDashboardSummary, type ApiAlert } from '@/lib/api';
 
-const summaryFetcher = () => apiFetch<DashboardSummary>('/dashboard/summary');
-const alertsFetcher = () => apiFetch<ApiAlert[]>('/alerts?limit=5');
-const camerasFetcher = () => apiFetch<ApiCamera[]>('/cameras');
+const summaryFetcher = () => fetchDashboardSummary();
+const alertsFetcher = () => fetchAlerts(5);
+const camerasFetcher = () => fetchCameras();
 
 function uiLevel(raw: string): string {
   if (raw === 'critical') return 'critical';
@@ -37,13 +37,13 @@ function levelStyle(level: string) {
 }
 
 export default function DashboardPage() {
-  const { data: summary, isLoading: sLoading } = useSWR('dash-summary', summaryFetcher, {
+  const { data: summary, isLoading: sLoading, error: sError } = useSWR('dash-summary', summaryFetcher, {
     refreshInterval: 10000,
   });
-  const { data: recentAlerts, isLoading: aLoading } = useSWR('dash-alerts', alertsFetcher, {
+  const { data: recentAlerts, isLoading: aLoading, error: aError } = useSWR('dash-alerts', alertsFetcher, {
     refreshInterval: 8000,
   });
-  const { data: cameras, isLoading: cLoading } = useSWR('dash-cameras', camerasFetcher, {
+  const { data: cameras, isLoading: cLoading, error: cError } = useSWR('dash-cameras', camerasFetcher, {
     refreshInterval: 15000,
   });
 
@@ -107,16 +107,19 @@ export default function DashboardPage() {
   }, [summary]);
 
   const loading = sLoading && !summary;
+  const hasError = Boolean(sError || aError || cError);
 
   return (
     <Sidebar currentPath="/dashboard">
       <Header
         title="仪表盘"
-        subtitle="数据来自后端 · 无未实现算法请勿当作已上线能力"
+        subtitle="园区态势、告警趋势与设备运行概览"
         statusBadge={
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-emerald-400 text-sm font-medium">API 已连接</span>
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${hasError ? 'bg-red-500/10 border-red-500/30' : 'bg-emerald-500/10 border-emerald-500/30'}`}>
+            <div className={`w-2 h-2 rounded-full ${hasError ? 'bg-red-400' : 'bg-emerald-400 animate-pulse'}`} />
+            <span className={`text-sm font-medium ${hasError ? 'text-red-400' : 'text-emerald-400'}`}>
+              {hasError ? '服务异常' : '运行正常'}
+            </span>
           </div>
         }
       />
@@ -126,6 +129,15 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2 text-slate-400 mb-4">
             <Loader2 className="w-5 h-5 animate-spin" />
             加载统计…
+          </div>
+        )}
+        {hasError && (
+          <div className="mb-4 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
+            数据加载异常：
+            {[sError, aError, cError]
+              .filter(Boolean)
+              .map((e) => (e instanceof Error ? e.message : String(e)))
+              .join('；')}
           </div>
         )}
 
@@ -230,7 +242,7 @@ export default function DashboardPage() {
                   </div>
                 ))}
                 {!cameras?.length && (
-                  <p className="text-slate-500 text-sm">暂无摄像头记录，可在后端 Swagger 创建。</p>
+                  <p className="text-slate-500 text-sm">暂无摄像头记录，可在实时监控页添加。</p>
                 )}
               </div>
             )}
@@ -252,7 +264,7 @@ export default function DashboardPage() {
                 </div>
               ))}
             </div>
-            <p className="text-xs text-slate-600 mt-4">由后端 jobs 表统计，非 CPU 监控。</p>
+            <p className="text-xs text-slate-600 mt-4">展示最近分析任务的处理状态。</p>
           </div>
 
           <div className="dashboard-card rounded-2xl p-5">

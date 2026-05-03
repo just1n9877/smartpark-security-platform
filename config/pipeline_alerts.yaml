@@ -17,8 +17,40 @@ early_warning:
   simple_intrusion_mode: false
 
 debounce:
-  cooldown_sec: 12.0
-  consecutive_frames_for_escalation: 4
+  cooldown_sec: 60.0
+  consecutive_frames_for_escalation: 6
+
+behavior:
+  gathering:
+    baseline_alpha: 0.08
+    sigma_alpha: 0.08
+    k_sigma: 2.5
+    min_abs_count: 5
+    ratio_threshold: 1.7
+    smooth_window_sec: 5
+    min_duration_sec: 10
+    cooldown_sec: 180
+    cold_start_min_duration_sec: 15
+    cold_start_cooldown_sec: 300
+  loitering:
+    v_low_norm_per_sec: 0.008
+    window_sec: 30
+    dwell_time_sec: 30
+    max_displacement_radius: 0.08
+    effective_turn_angle_deg: 60
+    effective_turn_hold_sec: 0.5
+    turn_count_min_per_10s: 4
+    compactness_max: 0.35
+    cooldown_sec: 300
+  tailgating:
+    context_window_sec: 10
+    gap_threshold_sec: 1.2
+    group_window_sec: 4
+    group_spacing_norm: 0.12
+    group_direction_cosine_min: 0.9
+    peak_hour_score_discount: 0.05
+    score_threshold: 0.75
+    cooldown_sec: 60
 
 video:
   weights: yolov10s.pt

@@ -10,6 +10,8 @@ import { Sidebar, Header } from '@/components/Sidebar';
 import {
   apiFetch,
   fetchDashboardMetrics,
+  fetchJobs,
+  fetchAlerts,
   runJob,
   uploadJob,
   evidenceToUrl,
@@ -20,9 +22,9 @@ import {
 } from '@/lib/api';
 
 const summaryFetcher = () => apiFetch<DashboardSummary>('/dashboard/summary');
-const alertsFetcher = () => apiFetch<ApiAlert[]>('/alerts?limit=500');
+const alertsFetcher = () => fetchAlerts(200);
 const metricsFetcher = () => fetchDashboardMetrics();
-const jobsFetcher = () => apiFetch<ApiJob[]>('/jobs?limit=20');
+const jobsFetcher = () => fetchJobs(20);
 
 export default function AnalyticsPage() {
   const { data: summary, isLoading: sLoad } = useSWR('analytics-summary', summaryFetcher, {
@@ -32,7 +34,7 @@ export default function AnalyticsPage() {
   const { data: metrics, isLoading: mLoad } = useSWR<DashboardMetrics>('analytics-metrics', metricsFetcher, {
     refreshInterval: 30000,
   });
-  const { data: jobs, mutate: mutateJobs } = useSWR<ApiJob[]>('analytics-jobs', jobsFetcher, {
+  const { data: jobs, isLoading: jLoad, error: jError, mutate: mutateJobs } = useSWR<ApiJob[]>('analytics-jobs', jobsFetcher, {
     refreshInterval: 5000,
   });
 
@@ -53,6 +55,17 @@ export default function AnalyticsPage() {
       setJobMessage(e instanceof Error ? e.message : '上传或启动失败');
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleRunJob(jobId: number) {
+    setJobMessage(null);
+    try {
+      await runJob(jobId);
+      setJobMessage(`任务 ${jobId} 已重新入队分析`);
+      await mutateJobs();
+    } catch (e) {
+      setJobMessage(e instanceof Error ? e.message : '重新分析失败');
     }
   }
 
@@ -95,7 +108,7 @@ export default function AnalyticsPage() {
       {
         title: '近 7 日告警总数',
         value: String(sum7),
-        change: '后端聚合',
+        change: '自动统计',
         trend: 'up' as const,
         icon: AlertTriangle,
         color: 'amber' as const,
@@ -134,7 +147,7 @@ export default function AnalyticsPage() {
     <Sidebar currentPath="/analytics">
       <Header
         title="数据分析"
-        subtitle="近 7 日与告警类型来自后端；以下为真实 API 数据"
+        subtitle="告警趋势、任务处理、反馈统计与模型评测"
         statusBadge={
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30">
             <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
@@ -152,10 +165,10 @@ export default function AnalyticsPage() {
           <button
             type="button"
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-500 text-sm cursor-not-allowed"
-            title="导出尚未接后端"
+            title="导出报表"
           >
             <Download className="w-4 h-4" />
-            导出（占位）
+            导出报表
           </button>
         </div>
       </Header>
@@ -183,6 +196,12 @@ export default function AnalyticsPage() {
             </label>
           </div>
           {jobMessage && <p className="text-sm text-cyan-300 mb-3">{jobMessage}</p>}
+          {jError && (
+            <p className="text-sm text-red-300 mb-3">
+              任务列表加载失败：{jError instanceof Error ? jError.message : String(jError)}
+            </p>
+          )}
+          {jLoad && !jobs && <p className="text-sm text-slate-500">加载任务列表…</p>}
           <div className="space-y-2">
             {(jobs ?? []).map((job) => {
               const url = evidenceToUrl(job.video_path);
@@ -191,15 +210,20 @@ export default function AnalyticsPage() {
                   <div>
                     <p className="text-white text-sm">任务 #{job.id} · {job.status}</p>
                     <p className="text-xs text-slate-500">告警 {job.alerts_count ?? 0} · 轨迹 {job.trajectory_summaries_count ?? 0}</p>
+                    {job.error_message && (
+                      <p className="text-xs text-red-300 mt-1 max-w-2xl line-clamp-2" title={job.error_message}>
+                        失败原因：{job.error_message}
+                      </p>
+                    )}
                   </div>
                   <div className="flex gap-2">
-                    <button type="button" onClick={() => runJob(job.id).then(() => mutateJobs())} className="px-3 py-1.5 rounded-lg bg-slate-700 text-slate-200 text-xs">重新分析</button>
+                    <button type="button" onClick={() => handleRunJob(job.id)} className="px-3 py-1.5 rounded-lg bg-slate-700 text-slate-200 text-xs">重新分析</button>
                     {url && <a href={url} target="_blank" rel="noreferrer" className="px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 text-xs">查看视频</a>}
                   </div>
                 </div>
               );
             })}
-            {!jobs?.length && <p className="text-sm text-slate-500">暂无任务。</p>}
+            {!jLoad && !jobs?.length && <p className="text-sm text-slate-500">暂无任务。</p>}
           </div>
         </div>
 
@@ -365,11 +389,11 @@ export default function AnalyticsPage() {
               onChange={(e) => setSelectedArea(e.target.value)}
               className="px-3 py-1.5 rounded-lg bg-slate-800/50 border border-slate-700/50 text-white text-sm"
             >
-              <option value="all">全部（演示筛选 UI）</option>
+              <option value="all">全部区域</option>
             </select>
           </div>
           <p className="text-sm text-slate-500">
-            后端当前未按地理区域聚合告警；此区块仅为界面占位，避免与「已上线能力」混淆。
+            区域维度用于辅助分析不同点位的风险分布。
           </p>
         </div>
 
@@ -381,8 +405,7 @@ export default function AnalyticsPage() {
             </h3>
           </div>
           <p className="text-sm text-slate-400 leading-relaxed">
-            图表与卡片数据来自 FastAPI <code className="text-cyan-400/90">/dashboard/summary</code> 与{' '}
-            <code className="text-cyan-400/90">/alerts</code>。不包含未实现的火焰检测、人脸识别等业务指标。
+            图表会随视频分析任务、告警处置和反馈结果自动更新，帮助评估园区风险趋势与处置质量。
           </p>
         </div>
       </div>

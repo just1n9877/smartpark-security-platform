@@ -70,11 +70,44 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(Enum(UserRole, native_enum=False), default=UserRole.guard)
+    full_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
 
     feedbacks: Mapped[list[Feedback]] = relationship("Feedback", back_populates="user")
+
+
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    email_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    sms_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    app_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    wechat_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class SecurityAuditLog(Base):
+    __tablename__ = "security_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(64), index=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="success", index=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class Person(Base):
@@ -149,6 +182,28 @@ class Camera(Base):
     alerts: Mapped[list[Alert]] = relationship("Alert", back_populates="camera")
     scene_rules: Mapped[list[SceneRule]] = relationship("SceneRule", back_populates="camera")
     jobs: Mapped[list[AnalysisJob]] = relationship("AnalysisJob", back_populates="camera")
+
+
+class Device(Base):
+    __tablename__ = "devices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    device_type: Mapped[str] = mapped_column(String(32), default="server", index=True)
+    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="online", index=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    cpu_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    memory_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    disk_percent: Mapped[float] = mapped_column(Float, default=0.0)
+    uptime: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_check_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class AnalysisJob(Base):
@@ -366,10 +421,10 @@ class SystemConfig(Base):
     __tablename__ = "system_configs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False, default=1)
-    consecutive_frames_for_escalation: Mapped[int] = mapped_column(Integer, default=4)
+    consecutive_frames_for_escalation: Mapped[int] = mapped_column(Integer, default=6)
     dwell_warning_sec: Mapped[float] = mapped_column(Float, default=1.2)
     dwell_alert_sec: Mapped[float] = mapped_column(Float, default=3.0)
-    cooldown_sec: Mapped[float] = mapped_column(Float, default=12.0)
+    cooldown_sec: Mapped[float] = mapped_column(Float, default=60.0)
     reversal_alert_k: Mapped[int] = mapped_column(Integer, default=4)
     feedback_window_n: Mapped[int] = mapped_column(Integer, default=20)
     high_fp_threshold: Mapped[float] = mapped_column(Float, default=0.4)

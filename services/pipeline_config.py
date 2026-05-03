@@ -25,6 +25,7 @@ class PipelineConfig:
     conf: float
     embedder_gpu: bool
     batch_insert_frames: int
+    behavior: dict[str, Any]
 
 
 def default_config_path(project_root: Path) -> Path:
@@ -54,4 +55,5 @@ def load_pipeline_config(path: Path | None, project_root: Path) -> PipelineConfi
         conf=float(vid.get("conf", 0.35)),
         embedder_gpu=bool(int(vid.get("embedder_gpu", 0))),
         batch_insert_frames=int(raw.get("batch_insert_frames", 500)),
+        behavior=raw.get("behavior") or {},
     )

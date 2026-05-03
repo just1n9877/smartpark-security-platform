@@ -111,7 +111,7 @@ export default function LoginPage() {
       await loginApi(username, password);
       router.push('/dashboard');
     } catch (e) {
-      setError(e instanceof Error ? e.message : '登录失败，请检查后端是否已启动 (8000)');
+      setError(e instanceof Error ? e.message : '登录失败，服务暂不可用，请稍后重试');
     } finally {
       setIsLoading(false);
     }

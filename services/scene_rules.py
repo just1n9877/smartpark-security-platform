@@ -58,7 +58,7 @@ def fallback_rule_from_pipeline(cfg: PipelineConfig, camera_id: int | None = Non
         geometry=geometry,
         risk_level=3,
         dwell_threshold_sec=float(cfg.dwell_alert_sec),
-        config_json={"source": "pipeline_fallback"},
+        config_json={"source": "pipeline_fallback", "behavior": cfg.behavior},
     )
 
 

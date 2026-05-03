@@ -31,6 +31,11 @@ def ensure_sqlite_migrations() -> None:
     tables = set(insp.get_table_names())
     if "users" in tables:
         _sqlite_add_column("users", "email VARCHAR(255)")
+        _sqlite_add_column("users", "full_name VARCHAR(128)")
+        _sqlite_add_column("users", "phone VARCHAR(64)")
+        _sqlite_add_column("users", "department VARCHAR(128)")
+        _sqlite_add_column("users", "title VARCHAR(128)")
+        _sqlite_add_column("users", "is_active INTEGER DEFAULT 1")
     if "cameras" in tables:
         _sqlite_add_column("cameras", "location VARCHAR(255)")
         _sqlite_add_column("cameras", "risk_level INTEGER DEFAULT 2")

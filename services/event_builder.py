@@ -143,5 +143,5 @@ class EventBuilder:
             event_type=event_type,
             ts=obs.ts,
             event_at=now,
-            payload={**payload, "rule_name": rule.name, "rule_type": rule.rule_type},
+            payload={**payload, "rule_name": rule.name, "rule_type": rule.rule_type, "identity": obs.identity},
         )

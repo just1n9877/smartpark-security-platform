@@ -14,10 +14,12 @@ from app.routers import (
     auth_routes,
     cameras_routes,
     dashboard_routes,
+    devices_routes,
     face_routes,
     jobs_routes,
     scene_rules_routes,
     settings_routes,
+    users_routes,
 )
 from app.model_registry import sync_active_version_from_db
 from app.retrain_scheduler import spawn_retrain_scheduler
@@ -48,6 +50,7 @@ app = FastAPI(
 app.include_router(auth_routes.router, prefix="/auth", tags=["auth"])
 app.include_router(alerts_routes.router, prefix="/alerts", tags=["alerts"])
 app.include_router(cameras_routes.router, prefix="/cameras", tags=["cameras"])
+app.include_router(devices_routes.router, prefix="/devices", tags=["devices"])
 app.include_router(face_routes.router, prefix="/face", tags=["face"])
 app.include_router(jobs_routes.router, prefix="/jobs", tags=["jobs"])
 app.include_router(scene_rules_routes.router, prefix="/scene-rules", tags=["scene-rules"])
@@ -55,6 +58,7 @@ app.include_router(assistant_routes.router, prefix="/assistant", tags=["assistan
 app.include_router(dashboard_routes.router, prefix="/dashboard", tags=["dashboard"])
 app.include_router(settings_routes.router, prefix="/settings", tags=["settings"])
 app.include_router(admin_routes.router, prefix="/admin", tags=["admin"])
+app.include_router(users_routes.router, prefix="/users", tags=["users"])
 
 app.add_middleware(
     CORSMiddleware,

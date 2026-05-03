@@ -25,6 +25,7 @@ class AlertEngine:
 
     def __init__(self) -> None:
         self._open_keys: set[tuple[int | None, int | None, int, str]] = set()
+        self._recent_by_rule_type: dict[tuple[int | None, str], list[float]] = {}
 
     def reset_lifecycle(self, rule_id: int | None, track_id: int) -> None:
         for key in list(self._open_keys):
@@ -36,9 +37,15 @@ class AlertEngine:
         if key in self._open_keys:
             return None
         self._open_keys.add(key)
-        level = self._level_for(event)
+        repetition_penalty = self._historical_repetition_penalty(event)
+        level = self._level_for(event, repetition_penalty)
         reason = self._reason_text(event, level)
-        reason_json = {**event.reason_json, "alert_level": level, "reason": reason}
+        reason_json = {
+            **event.reason_json,
+            "alert_level": level,
+            "historical_repetition_penalty": repetition_penalty,
+            "reason": reason,
+        }
         return AlertEvent(
             level=level,
             alert_type=event.event_type,
@@ -51,8 +58,17 @@ class AlertEngine:
             reason_json=reason_json,
         )
 
+    def _historical_repetition_penalty(self, event: CompoundEventData) -> int:
+        key = (event.rule.id, event.event_type)
+        recent = self._recent_by_rule_type.setdefault(key, [])
+        recent[:] = [ts for ts in recent if event.ts - ts <= 900.0]
+        recent.append(event.ts)
+        if event.event_type not in {"gathering", "suspicious_loitering", "tailgating"}:
+            return 0
+        return -1 if len(recent) >= 4 else 0
+
     @staticmethod
-    def _level_for(event: CompoundEventData) -> str:
+    def _level_for(event: CompoundEventData, repetition_penalty: int = 0) -> str:
         risk = int(event.rule.risk_level or 2)
         camera_risk = int(event.rule.camera_risk_level or 2)
         non_auth = bool(event.reason_json.get("non_authorized_time"))
@@ -76,7 +92,10 @@ class AlertEngine:
             "gathering": 1,
             "abnormal_path": 1,
         }.get(event.event_type, 1)
-        score = max(risk, camera_risk) + event_weight + identity_weight + (1 if non_auth else 0)
+        params = event.reason_json.get("parameters") or {}
+        if event.event_type == "tailgating" and params.get("group_like"):
+            event_weight = max(1, event_weight - 1)
+        score = max(risk, camera_risk) + event_weight + identity_weight + (1 if non_auth else 0) + repetition_penalty
         if score >= 8:
             return "critical"
         if score >= 6:

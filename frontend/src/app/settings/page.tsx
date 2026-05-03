@@ -1,12 +1,47 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
+import useSWR from 'swr';
 import {
-  User, Users, Shield, Bell, Lock, Eye, EyeOff,
-  Save, Plus, Edit, Trash2, Key, Upload, ToggleLeft, ToggleRight, SlidersHorizontal,
+  Bell,
+  Edit,
+  Eye,
+  EyeOff,
+  Key,
+  Loader2,
+  Lock,
+  Plus,
+  Save,
+  Shield,
+  SlidersHorizontal,
+  Trash2,
+  ToggleLeft,
+  ToggleRight,
+  User,
+  Users,
 } from 'lucide-react';
 import { Sidebar, Header } from '@/components/Sidebar';
-import { fetchMe, fetchSettings, patchSettings, type SettingsOut, type UserPublic } from '@/lib/api';
+import {
+  changePassword,
+  createUser,
+  disableUser,
+  fetchMe,
+  fetchNotificationPreference,
+  fetchSecurityLogs,
+  fetchSettings,
+  fetchUsers,
+  patchNotificationPreference,
+  patchSettings,
+  updateMe,
+  updateUser,
+  type AdminUserPayload,
+  type NotificationPreference,
+  type SecurityAuditLog,
+  type SettingsOut,
+  type SettingsPatch,
+  type UserProfilePayload,
+  type UserPublic,
+} from '@/lib/api';
 
 const tabs = [
   { id: 'pipeline', label: '预警策略', icon: SlidersHorizontal },
@@ -15,81 +50,228 @@ const tabs = [
   { id: 'roles', label: '角色权限', icon: Shield },
   { id: 'notifications', label: '通知设置', icon: Bell },
   { id: 'security', label: '安全设置', icon: Lock },
-];
+] as const;
+
+type TabId = (typeof tabs)[number]['id'];
+
+function settingsDraft(s: SettingsOut): SettingsPatch {
+  const ml = s.unified_ml;
+  return {
+    consecutive_frames_for_escalation: s.effective.consecutive_frames_for_escalation,
+    dwell_warning_sec: s.effective.dwell_warning_sec,
+    dwell_alert_sec: s.effective.dwell_alert_sec,
+    cooldown_sec: s.effective.cooldown_sec,
+    reversal_alert_k: s.effective.reversal_alert_k,
+    feedback_window_n: s.tuning.feedback_window_n,
+    high_fp_threshold: s.tuning.high_fp_threshold,
+    max_consecutive_frames: s.tuning.max_consecutive_frames,
+    ml_enabled: ml?.ml_enabled ?? true,
+    ml_iforest_min_anomaly_01: ml?.ml_iforest_min_anomaly_01 ?? 0.55,
+    ml_gru_min_anomaly_01: ml?.ml_gru_min_anomaly_01 ?? 0.5,
+    ml_emit_separate_alerts: ml?.ml_emit_separate_alerts ?? true,
+    retrain_on_feedback: ml?.retrain_on_feedback ?? false,
+    retrain_feedback_delay_sec: ml?.retrain_feedback_delay_sec ?? 10,
+    retrain_interval_hours: ml?.retrain_interval_hours ?? 0,
+    holdout_job_fraction: ml?.holdout_job_fraction ?? 0.2,
+    rtsp_max_workers: ml?.rtsp_max_workers ?? 4,
+    stream_alert_merge_sec: ml?.stream_alert_merge_sec ?? 45,
+  };
+}
+
+function userDraft(u?: UserPublic | null): UserProfilePayload {
+  return {
+    full_name: u?.full_name ?? '',
+    email: u?.email ?? '',
+    phone: u?.phone ?? '',
+    department: u?.department ?? '',
+    title: u?.title ?? '',
+  };
+}
+
+const roleLabels: Record<string, string> = {
+  admin: '管理员',
+  guard: '值班人员',
+};
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('pipeline');
+  const [activeTab, setActiveTab] = useState<TabId>('pipeline');
+  const [message, setMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-  const [me, setMe] = useState<UserPublic | null>(null);
-  const [st, setSt] = useState<SettingsOut | null>(null);
-  const [pipeErr, setPipeErr] = useState<string | null>(null);
-  const [pipeBusy, setPipeBusy] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [pipelineDraft, setPipelineDraft] = useState<SettingsPatch>({});
+  const [profileDraft, setProfileDraft] = useState<UserProfilePayload>({});
+  const [passwordDraft, setPasswordDraft] = useState({ current_password: '', new_password: '', confirm: '' });
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserPublic | null>(null);
+  const [userForm, setUserForm] = useState<AdminUserPayload>({ role: 'guard', is_active: true });
 
-  useEffect(() => {
-    if (activeTab !== 'pipeline') return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const [u, s] = await Promise.all([fetchMe(), fetchSettings()]);
-        if (!cancelled) {
-          setMe(u);
-          setSt(s);
-          setPipeErr(null);
-        }
-      } catch (e) {
-        if (!cancelled) setPipeErr(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
+  const { data: me, error: meError, mutate: mutateMe } = useSWR<UserPublic>('settings-me', fetchMe, {
+    onSuccess: (u) => setProfileDraft(userDraft(u)),
+  });
+  const { data: st, error: settingsError, mutate: mutateSettings } = useSWR<SettingsOut>('settings-system', fetchSettings, {
+    onSuccess: (s) => setPipelineDraft(settingsDraft(s)),
+  });
+  const { data: users, error: usersError, mutate: mutateUsers } = useSWR<UserPublic[]>(
+    me?.role === 'admin' ? 'settings-users' : null,
+    fetchUsers,
+  );
+  const { data: notification, error: notificationError, mutate: mutateNotification } = useSWR<NotificationPreference>(
+    'settings-notification',
+    fetchNotificationPreference,
+  );
+  const { data: logs, error: logsError, mutate: mutateLogs } = useSWR<SecurityAuditLog[]>(
+    me?.role === 'admin' ? 'settings-security-logs' : null,
+    () => fetchSecurityLogs(80),
+  );
+
+  const loadError = meError || settingsError || usersError || notificationError || logsError;
+  const isAdmin = me?.role === 'admin';
+
+  const roleStats = useMemo(() => {
+    const rows = users ?? [];
+    return {
+      admin: rows.filter((u) => u.role === 'admin').length,
+      guard: rows.filter((u) => u.role === 'guard').length,
+      active: rows.filter((u) => u.is_active !== false).length,
+      disabled: rows.filter((u) => u.is_active === false).length,
     };
-  }, [activeTab]);
+  }, [users]);
 
-  async function refreshPipeline() {
-    setPipeBusy(true);
+  async function run(action: () => Promise<void>, success: string) {
+    setBusy(true);
+    setMessage(null);
     try {
-      const s = await fetchSettings();
-      setSt(s);
-      setPipeErr(null);
+      await action();
+      setMessage(success);
     } catch (e) {
-      setPipeErr(e instanceof Error ? e.message : String(e));
+      setMessage(e instanceof Error ? e.message : String(e));
     } finally {
-      setPipeBusy(false);
+      setBusy(false);
     }
   }
 
-  async function resetYamlDefaults() {
-    if (!me || me.role !== 'admin') return;
-    setPipeBusy(true);
-    try {
-      const s = await patchSettings({ reset_to_yaml_defaults: true });
-      setSt(s);
-      setPipeErr(null);
-    } catch (e) {
-      setPipeErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPipeBusy(false);
-    }
+  async function savePipeline() {
+    if (!isAdmin) return;
+    await run(async () => {
+      const next = await patchSettings(pipelineDraft);
+      setPipelineDraft(settingsDraft(next));
+      await mutateSettings(next, false);
+    }, '预警策略已保存');
   }
+
+  async function resetPipeline() {
+    if (!isAdmin) return;
+    await run(async () => {
+      const next = await patchSettings({ reset_to_yaml_defaults: true });
+      setPipelineDraft(settingsDraft(next));
+      await mutateSettings(next, false);
+    }, '已恢复 YAML 默认配置');
+  }
+
+  async function saveProfile() {
+    await run(async () => {
+      const next = await updateMe(profileDraft);
+      setProfileDraft(userDraft(next));
+      await mutateMe(next, false);
+    }, '个人信息已保存');
+  }
+
+  function openUserModal(user?: UserPublic) {
+    setEditingUser(user ?? null);
+    setUserForm(user ? {
+      full_name: user.full_name ?? '',
+      email: user.email ?? '',
+      phone: user.phone ?? '',
+      department: user.department ?? '',
+      title: user.title ?? '',
+      role: user.role,
+      is_active: user.is_active !== false,
+    } : { username: '', password: '', role: 'guard', is_active: true });
+    setShowUserModal(true);
+  }
+
+  async function saveUser() {
+    if (!isAdmin) return;
+    await run(async () => {
+      if (editingUser) {
+        await updateUser(editingUser.id, userForm);
+      } else {
+        if (!userForm.username || !userForm.password) throw new Error('请填写用户名和初始密码');
+        await createUser(userForm as Required<Pick<AdminUserPayload, 'username' | 'password'>> & AdminUserPayload);
+      }
+      setShowUserModal(false);
+      await mutateUsers();
+      await mutateLogs();
+    }, editingUser ? '用户已更新' : '用户已创建');
+  }
+
+  async function toggleUser(user: UserPublic) {
+    if (!isAdmin) return;
+    await run(async () => {
+      if (user.is_active === false) {
+        await updateUser(user.id, { is_active: true });
+      } else {
+        await disableUser(user.id);
+      }
+      await mutateUsers();
+      await mutateLogs();
+    }, user.is_active === false ? '用户已启用' : '用户已停用');
+  }
+
+  async function saveNotification(partial: Partial<Omit<NotificationPreference, 'updated_at'>>) {
+    await run(async () => {
+      const next = await patchNotificationPreference(partial);
+      await mutateNotification(next, false);
+      await mutateLogs();
+    }, '通知设置已保存');
+  }
+
+  async function savePassword() {
+    if (passwordDraft.new_password !== passwordDraft.confirm) {
+      setMessage('两次输入的新密码不一致');
+      return;
+    }
+    await run(async () => {
+      await changePassword({
+        current_password: passwordDraft.current_password,
+        new_password: passwordDraft.new_password,
+      });
+      setPasswordDraft({ current_password: '', new_password: '', confirm: '' });
+      await mutateLogs();
+    }, '密码已修改');
+  }
+
+  const numberFields: [keyof SettingsPatch, string, number, number, number][] = [
+    ['consecutive_frames_for_escalation', '确认帧数 M', 2, 30, 1],
+    ['dwell_warning_sec', '预警停留秒', 0.1, 3600, 0.5],
+    ['dwell_alert_sec', '告警停留秒', 0.1, 3600, 0.5],
+    ['cooldown_sec', '冷却秒', 1, 86400, 1],
+    ['reversal_alert_k', '折返阈值 K', 1, 100, 1],
+    ['feedback_window_n', '反馈窗口 N', 5, 500, 1],
+    ['high_fp_threshold', '高误报阈值', 0.05, 0.95, 0.01],
+    ['max_consecutive_frames', 'M 上限', 3, 30, 1],
+    ['ml_iforest_min_anomaly_01', 'IForest 阈值', 0.05, 0.99, 0.01],
+    ['ml_gru_min_anomaly_01', 'GRU-AE 阈值', 0.05, 0.99, 0.01],
+    ['retrain_feedback_delay_sec', '反馈后训练延迟秒', 0, 86400, 1],
+    ['rtsp_max_workers', 'RTSP 并发数', 1, 32, 1],
+    ['stream_alert_merge_sec', '流式告警合并秒', 5, 600, 1],
+  ];
 
   return (
     <Sidebar currentPath="/settings">
-      <Header 
-        title="系统设置" 
-        subtitle="系统配置与用户管理"
-      />
+      <Header title="系统设置" subtitle="用户、权限、通知、安全审计与预警策略" />
 
       <div className="flex-1 flex overflow-hidden">
-        {/* 侧边栏 */}
         <div className="w-64 border-r border-slate-700/30 bg-slate-900/30 p-4">
           <nav className="space-y-1">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => setActiveTab(tab.id)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all ${
-                  activeTab === tab.id 
-                    ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30' 
+                  activeTab === tab.id
+                    ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
                     : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
                 }`}
               >
@@ -100,103 +282,88 @@ export default function SettingsPage() {
           </nav>
         </div>
 
-        {/* 主内容区 */}
         <div className="flex-1 overflow-y-auto p-6">
+          {message && (
+            <div className="mb-4 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
+              {message}
+            </div>
+          )}
+          {loadError && (
+            <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+              加载失败：{loadError instanceof Error ? loadError.message : String(loadError)}
+            </div>
+          )}
+
           {activeTab === 'pipeline' && (
-            <div className="max-w-3xl space-y-6">
+            <div className="max-w-5xl space-y-6">
               <div>
-                <h3 className="text-lg font-bold text-white mb-1">预警与去抖（SystemConfig）</h3>
-                <p className="text-sm text-slate-400">
-                  与验收阶段4一致：流水线日志会打印当前确认帧数 M；误报反馈滚动统计超阈值时自动 M+1（见{' '}
-                  <code className="text-cyan-400/90">docs/demo_script.md</code>）。先验视频域说明见 README，勿将 RepCount 表述为园区行走数据。
-                </p>
+                <h3 className="text-lg font-bold text-white mb-1">预警与去抖策略</h3>
+                <p className="text-sm text-slate-400">管理员可调整告警阈值、模型策略和视频流处理参数。</p>
               </div>
-              {pipeErr && (
-                <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                  {pipeErr}
-                </div>
-              )}
-              {!st && !pipeErr && (
-                <p className="text-slate-400 text-sm">加载中…</p>
-              )}
-              {st && (
+              {!st ? (
+                <p className="text-slate-400 flex items-center gap-2"><Loader2 className="w-5 h-5 animate-spin" />加载配置…</p>
+              ) : (
                 <>
-                  <div className="dashboard-card rounded-2xl p-5 space-y-4">
-                    <h4 className="text-white font-medium">当前生效（DB + YAML 基准合并）</h4>
-                    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                      <div>
-                        <dt className="text-slate-500">确认帧数 M</dt>
-                        <dd className="text-cyan-300 font-mono">{st.effective.consecutive_frames_for_escalation}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-slate-500">预警停留阈值（s）</dt>
-                        <dd className="text-slate-200 font-mono">
-                          warn {st.effective.dwell_warning_sec.toFixed(2)} / alert {st.effective.dwell_alert_sec.toFixed(2)}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-slate-500">冷却（s）</dt>
-                        <dd className="text-slate-200 font-mono">{st.effective.cooldown_sec.toFixed(1)}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-slate-500">折返告警阈值 K</dt>
-                        <dd className="text-slate-200 font-mono">{st.effective.reversal_alert_k}</dd>
-                      </div>
-                    </dl>
-                  </div>
-                  <div className="dashboard-card rounded-2xl p-5 space-y-2">
-                    <h4 className="text-white font-medium">YAML 文件基准（config/pipeline_alerts.yaml）</h4>
-                    <p className="text-xs text-slate-500 font-mono">
-                      M={st.yaml_baseline.consecutive_frames_for_escalation} · dwell_warn={st.yaml_baseline.dwell_warning_sec} ·
-                      dwell_alert={st.yaml_baseline.dwell_alert_sec}
-                    </p>
-                  </div>
-                  <div className="dashboard-card rounded-2xl p-5 space-y-3">
-                    <h4 className="text-white font-medium">自动调参参数</h4>
-                    <p className="text-sm text-slate-400">
-                      窗口 N={st.tuning.feedback_window_n}，误报率阈值={st.tuning.high_fp_threshold}，M 上限=
-                      {st.tuning.max_consecutive_frames}；更新 {new Date(st.tuning.updated_at).toLocaleString()}
-                    </p>
-                  </div>
-                  <div className="dashboard-card rounded-2xl p-5 space-y-3">
-                    <h4 className="text-white font-medium">滚动误报率（最近 N 条反馈）</h4>
-                    <p className="text-sm text-slate-400">
-                      全局：样本 {st.feedback_rollup.global.sample_size}，误报 {st.feedback_rollup.global.false_positives}
-                      {st.feedback_rollup.global.false_positive_rate != null
-                        ? `，率 ${(st.feedback_rollup.global.false_positive_rate * 100).toFixed(1)}%`
-                        : ''}
-                    </p>
-                    <div className="max-h-48 overflow-y-auto text-xs text-slate-500 space-y-1">
-                      {st.feedback_rollup.by_camera.map((c) => (
-                        <div key={`${c.camera_id ?? 'na'}-${c.camera_name}`}>
-                          {c.camera_name}: n={c.sample_size} fp={c.false_positives}
-                          {c.false_positive_rate != null ? ` (${(c.false_positive_rate * 100).toFixed(1)}%)` : ''}
-                        </div>
-                      ))}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="dashboard-card rounded-2xl p-5">
+                      <p className="text-sm text-slate-500">当前 M</p>
+                      <p className="text-3xl font-bold text-cyan-300">{st.effective.consecutive_frames_for_escalation}</p>
+                    </div>
+                    <div className="dashboard-card rounded-2xl p-5">
+                      <p className="text-sm text-slate-500">误报窗口</p>
+                      <p className="text-3xl font-bold text-emerald-300">{st.tuning.feedback_window_n}</p>
+                    </div>
+                    <div className="dashboard-card rounded-2xl p-5">
+                      <p className="text-sm text-slate-500">全局反馈样本</p>
+                      <p className="text-3xl font-bold text-amber-300">{st.feedback_rollup.global.sample_size}</p>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-3">
-                    <button
-                      type="button"
-                      onClick={() => refreshPipeline()}
-                      disabled={pipeBusy}
-                      className="px-4 py-2 rounded-xl bg-slate-700 text-white text-sm hover:bg-slate-600 disabled:opacity-50"
-                    >
-                      刷新
-                    </button>
-                    {me?.role === 'admin' && (
-                      <button
-                        type="button"
-                        onClick={() => resetYamlDefaults()}
-                        disabled={pipeBusy}
-                        className="px-4 py-2 rounded-xl bg-cyan-600 text-white text-sm hover:bg-cyan-500 disabled:opacity-50"
-                      >
+
+                  <div className="dashboard-card rounded-2xl p-5 space-y-4">
+                    <h4 className="text-white font-medium">可写参数</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
+                      {numberFields.map(([key, label, min, max, step]) => (
+                        <label key={key} className="space-y-1">
+                          <span className="text-slate-400">{label}</span>
+                          <input
+                            type="number"
+                            min={min}
+                            max={max}
+                            step={step}
+                            value={Number(pipelineDraft[key] ?? 0)}
+                            onChange={(e) => setPipelineDraft({ ...pipelineDraft, [key]: Number(e.target.value) })}
+                            disabled={!isAdmin}
+                            className="w-full px-3 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white disabled:opacity-50"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-4 text-sm text-slate-300">
+                      {[
+                        ['ml_enabled', '启用 ML'],
+                        ['ml_emit_separate_alerts', '输出单独模型告警'],
+                        ['retrain_on_feedback', '反馈触发训练'],
+                      ].map(([key, label]) => (
+                        <label key={key} className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(pipelineDraft[key as keyof SettingsPatch])}
+                            disabled={!isAdmin}
+                            onChange={(e) => setPipelineDraft({ ...pipelineDraft, [key]: e.target.checked })}
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex gap-3">
+                      <button type="button" onClick={savePipeline} disabled={!isAdmin || busy} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm disabled:opacity-50">
+                        保存配置
+                      </button>
+                      <button type="button" onClick={resetPipeline} disabled={!isAdmin || busy} className="px-4 py-2 rounded-xl bg-cyan-600 text-white text-sm disabled:opacity-50">
                         恢复 YAML 默认
                       </button>
-                    )}
-                    {me && me.role !== 'admin' && (
-                      <span className="text-xs text-slate-500 self-center">仅管理员可 PATCH 重置，当前为值班账号。</span>
-                    )}
+                      {!isAdmin && <span className="text-xs text-slate-500 self-center">仅管理员可修改配置。</span>}
+                    </div>
                   </div>
                 </>
               )}
@@ -204,194 +371,103 @@ export default function SettingsPage() {
           )}
 
           {activeTab === 'profile' && (
-            <div className="max-w-2xl">
-              <h3 className="text-lg font-bold text-white mb-6">个人信息</h3>
-              
-              {/* 头像 */}
-              <div className="mb-6">
-                <label className="block text-sm text-slate-400 mb-3">头像</label>
-                <div className="flex items-center gap-4">
-                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-emerald-500/20 border border-cyan-500/30 flex items-center justify-center">
-                    <User className="w-10 h-10 text-cyan-400" />
-                  </div>
-                  <button className="px-4 py-2 rounded-xl bg-slate-800/50 text-white text-sm font-medium border border-slate-700/50 hover:border-cyan-500/50 transition-colors flex items-center gap-2">
-                    <Upload className="w-4 h-4" />
-                    更换头像
-                  </button>
-                </div>
-              </div>
-
-              {/* 表单 */}
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-2">姓名</label>
-                    <input 
-                      type="text" 
-                      defaultValue="管理员"
-                      className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm focus:outline-none focus:border-cyan-500/50 transition-colors"
+            <div className="max-w-2xl space-y-6">
+              <h3 className="text-lg font-bold text-white">个人信息</h3>
+              <div className="dashboard-card rounded-2xl p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                {[
+                  ['full_name', '姓名'],
+                  ['email', '邮箱'],
+                  ['phone', '电话'],
+                  ['department', '部门'],
+                  ['title', '职位'],
+                ].map(([key, label]) => (
+                  <label key={key} className="space-y-2">
+                    <span className="text-sm text-slate-400">{label}</span>
+                    <input
+                      value={String(profileDraft[key as keyof UserProfilePayload] ?? '')}
+                      onChange={(e) => setProfileDraft({ ...profileDraft, [key]: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-2">工号</label>
-                    <input 
-                      type="text" 
-                      defaultValue="ADMIN001"
-                      className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm focus:outline-none focus:border-cyan-500/50 transition-colors"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">邮箱</label>
-                  <input 
-                    type="email" 
-                    defaultValue="admin@smartpark.com"
-                    className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm focus:outline-none focus:border-cyan-500/50 transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">手机号</label>
-                  <input 
-                    type="tel" 
-                    defaultValue="138****8888"
-                    className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm focus:outline-none focus:border-cyan-500/50 transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">部门</label>
-                  <select className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm focus:outline-none focus:border-cyan-500/50 transition-colors">
-                    <option>安保部</option>
-                    <option>技术部</option>
-                    <option>运维部</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2">职位</label>
-                  <input 
-                    type="text" 
-                    defaultValue="系统管理员"
-                    className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm focus:outline-none focus:border-cyan-500/50 transition-colors"
-                  />
+                  </label>
+                ))}
+                <div className="md:col-span-2 text-sm text-slate-500">
+                  用户名：{me?.username ?? '—'} · 角色：{me ? roleLabels[me.role] : '—'}
                 </div>
               </div>
-
-              <div className="mt-6 pt-6 border-t border-slate-700/30 flex gap-3">
-                <button className="px-6 py-2.5 rounded-xl bg-cyan-500 text-white text-sm font-medium hover:bg-cyan-400 transition-colors flex items-center gap-2">
-                  <Save className="w-4 h-4" />
-                  保存修改
-                </button>
-                <button className="px-6 py-2.5 rounded-xl bg-slate-700 text-white text-sm font-medium hover:bg-slate-600 transition-colors">
-                  重置
-                </button>
-              </div>
+              <button type="button" onClick={saveProfile} disabled={busy} className="px-6 py-2.5 rounded-xl bg-cyan-500 text-white text-sm font-medium flex items-center gap-2 disabled:opacity-50">
+                <Save className="w-4 h-4" />
+                保存个人资料
+              </button>
             </div>
           )}
 
           {activeTab === 'users' && (
-            <div>
-              <div className="flex items-center justify-between mb-6">
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
                 <h3 className="text-lg font-bold text-white">用户管理</h3>
-                <button className="px-4 py-2 rounded-xl bg-cyan-500 text-white text-sm font-medium hover:bg-cyan-400 transition-colors flex items-center gap-2">
+                <button type="button" onClick={() => openUserModal()} disabled={!isAdmin} className="px-4 py-2 rounded-xl bg-cyan-500 text-white text-sm font-medium flex items-center gap-2 disabled:opacity-50">
                   <Plus className="w-4 h-4" />
                   添加用户
                 </button>
               </div>
-              
-              <div className="dashboard-card rounded-2xl overflow-hidden">
-                <table className="w-full">
-                  <thead className="bg-slate-800/50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">用户</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">角色</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">状态</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase">最后登录</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-slate-400 uppercase">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700/30">
-                    {[
-                      { name: '管理员', email: 'admin@smartpark.com', role: '超级管理员', status: 'online' },
-                      { name: '张伟', email: 'zhangwei@smartpark.com', role: '运维人员', status: 'online' },
-                      { name: '李娜', email: 'lina@smartpark.com', role: '普通用户', status: 'offline' },
-                    ].map((user, index) => (
-                      <tr key={index} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-slate-700/50 flex items-center justify-center">
-                              <User className="w-4 h-4 text-slate-500" />
-                            </div>
-                            <div>
-                              <p className="text-white font-medium">{user.name}</p>
-                              <p className="text-xs text-slate-500">{user.email}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-slate-400">{user.role}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                            user.status === 'online' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-500/10 text-slate-400'
-                          }`}>
-                            {user.status === 'online' ? '在线' : '离线'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-slate-400">2024-04-16 14:30</td>
-                        <td className="px-4 py-3 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <button className="p-1.5 rounded-lg hover:bg-slate-700/50 transition-colors">
-                              <Edit className="w-4 h-4 text-slate-400" />
+              {!isAdmin ? (
+                <div className="dashboard-card rounded-2xl p-8 text-slate-400">仅管理员可管理用户。</div>
+              ) : (
+                <div className="dashboard-card rounded-2xl overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-slate-800/50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs text-slate-400">用户</th>
+                        <th className="px-4 py-3 text-left text-xs text-slate-400">角色</th>
+                        <th className="px-4 py-3 text-left text-xs text-slate-400">状态</th>
+                        <th className="px-4 py-3 text-right text-xs text-slate-400">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-700/30">
+                      {(users ?? []).map((u) => (
+                        <tr key={u.id} className="hover:bg-slate-800/30">
+                          <td className="px-4 py-3">
+                            <p className="text-white font-medium">{u.full_name || u.username}</p>
+                            <p className="text-xs text-slate-500">{u.email || '无邮箱'} · {u.department || '无部门'}</p>
+                          </td>
+                          <td className="px-4 py-3 text-slate-300">{roleLabels[u.role]}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-1 rounded-lg text-xs ${u.is_active === false ? 'bg-slate-500/10 text-slate-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                              {u.is_active === false ? '停用' : '启用'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <button type="button" onClick={() => openUserModal(u)} className="p-1.5 rounded-lg hover:bg-slate-700/50">
+                              <Edit className="w-4 h-4 text-cyan-300" />
                             </button>
-                            <button className="p-1.5 rounded-lg hover:bg-slate-700/50 transition-colors">
+                            <button type="button" onClick={() => toggleUser(u)} className="p-1.5 rounded-lg hover:bg-slate-700/50">
                               <Trash2 className="w-4 h-4 text-red-400" />
                             </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
           {activeTab === 'roles' && (
-            <div>
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-bold text-white">角色权限</h3>
-                <button className="px-4 py-2 rounded-xl bg-cyan-500 text-white text-sm font-medium hover:bg-cyan-400 transition-colors flex items-center gap-2">
-                  <Plus className="w-4 h-4" />
-                  添加角色
-                </button>
-              </div>
-              
+            <div className="space-y-6">
+              <h3 className="text-lg font-bold text-white">角色权限</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {[
-                  { name: '超级管理员', desc: '拥有系统所有权限', count: 1, color: 'cyan' },
-                  { name: '运维人员', desc: '设备管理与监控', count: 3, color: 'emerald' },
-                  { name: '普通用户', desc: '查看监控与告警', count: 10, color: 'purple' },
-                  { name: '访客', desc: '仅查看权限', count: 5, color: 'slate' },
-                ].map((role, index) => (
-                  <div key={index} className="dashboard-card rounded-2xl p-5">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-xl bg-${role.color}-500/10 border border-${role.color}-500/20 flex items-center justify-center`}>
-                          <Shield className={`w-5 h-5 text-${role.color}-400`} />
-                        </div>
-                        <div>
-                          <h4 className="text-white font-medium">{role.name}</h4>
-                          <p className="text-xs text-slate-500">{role.desc}</p>
-                        </div>
-                      </div>
-                      <span className="text-xs text-slate-500">{role.count}人</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <button className="flex-1 py-2 rounded-xl bg-slate-800/50 text-white text-sm font-medium hover:bg-slate-700/50 transition-colors flex items-center justify-center gap-2">
-                        <Edit className="w-4 h-4" />
-                        编辑
-                      </button>
-                      <button className="px-4 py-2 rounded-xl bg-slate-800/50 text-slate-400 text-sm font-medium hover:bg-slate-700/50 transition-colors">
-                        权限
-                      </button>
-                    </div>
+                  { name: '管理员', desc: '可管理用户、系统策略、安全日志和所有业务配置', count: roleStats.admin },
+                  { name: '值班人员', desc: '可查看与处理告警、维护摄像头和业务资料，不能修改管理员配置', count: roleStats.guard },
+                  { name: '启用账号', desc: '当前可登录账号数量', count: roleStats.active },
+                  { name: '停用账号', desc: '已被管理员禁用的账号数量', count: roleStats.disabled },
+                ].map((role) => (
+                  <div key={role.name} className="dashboard-card rounded-2xl p-5">
+                    <Shield className="w-6 h-6 text-cyan-400 mb-3" />
+                    <h4 className="text-white font-medium">{role.name}</h4>
+                    <p className="text-sm text-slate-500 mt-1">{role.desc}</p>
+                    <p className="text-2xl font-bold text-cyan-300 mt-4">{role.count}</p>
                   </div>
                 ))}
               </div>
@@ -399,114 +475,126 @@ export default function SettingsPage() {
           )}
 
           {activeTab === 'notifications' && (
-            <div className="max-w-2xl">
-              <h3 className="text-lg font-bold text-white mb-6">通知设置</h3>
-              
-              <div className="space-y-4">
-                {[
-                  { label: '邮件通知', desc: '接收告警邮件推送', enabled: true },
-                  { label: '短信通知', desc: '接收紧急告警短信', enabled: true },
-                  { label: '应用推送', desc: '接收系统应用通知', enabled: true },
-                  { label: '微信推送', desc: '绑定微信接收通知', enabled: false },
-                ].map((item, index) => (
-                  <div key={index} className="dashboard-card rounded-2xl p-4 flex items-center justify-between">
-                    <div>
-                      <h4 className="text-white font-medium">{item.label}</h4>
-                      <p className="text-sm text-slate-500">{item.desc}</p>
-                    </div>
-                    <button className={`p-2 rounded-xl transition-colors ${item.enabled ? 'bg-cyan-500/20' : 'bg-slate-700/50'}`}>
-                      {item.enabled ? (
-                        <ToggleRight className="w-8 h-8 text-cyan-400" />
-                      ) : (
-                        <ToggleLeft className="w-8 h-8 text-slate-500" />
-                      )}
-                    </button>
-                  </div>
-                ))}
-              </div>
+            <div className="max-w-2xl space-y-6">
+              <h3 className="text-lg font-bold text-white">通知设置</h3>
+              {notification ? (
+                <div className="space-y-4">
+                  {[
+                    ['email_enabled', '邮件通知', '接收告警邮件推送'],
+                    ['sms_enabled', '短信通知', '接收紧急告警短信'],
+                    ['app_enabled', '应用推送', '接收系统应用通知'],
+                    ['wechat_enabled', '微信推送', '绑定微信接收通知'],
+                  ].map(([key, label, desc]) => {
+                    const enabled = Boolean(notification[key as keyof NotificationPreference]);
+                    return (
+                      <div key={key} className="dashboard-card rounded-2xl p-4 flex items-center justify-between">
+                        <div>
+                          <h4 className="text-white font-medium">{label}</h4>
+                          <p className="text-sm text-slate-500">{desc}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => saveNotification({ [key]: !enabled })}
+                          className={`p-2 rounded-xl transition-colors ${enabled ? 'bg-cyan-500/20' : 'bg-slate-700/50'}`}
+                        >
+                          {enabled ? <ToggleRight className="w-8 h-8 text-cyan-400" /> : <ToggleLeft className="w-8 h-8 text-slate-500" />}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-slate-400 flex items-center gap-2"><Loader2 className="w-5 h-5 animate-spin" />加载通知设置…</p>
+              )}
             </div>
           )}
 
           {activeTab === 'security' && (
-            <div className="max-w-2xl">
-              <h3 className="text-lg font-bold text-white mb-6">安全设置</h3>
-              
-              <div className="space-y-6">
-                <div className="dashboard-card rounded-2xl p-5">
-                  <h4 className="text-white font-medium mb-4 flex items-center gap-2">
-                    <Key className="w-5 h-5 text-cyan-400" />
-                    修改密码
-                  </h4>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm text-slate-400 mb-2">当前密码</label>
-                      <div className="relative">
-                        <input 
-                          type={showPassword ? 'text' : 'password'}
-                          placeholder="请输入当前密码"
-                          className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm focus:outline-none focus:border-cyan-500/50 transition-colors"
-                        />
-                        <button 
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2"
-                        >
-                          {showPassword ? <EyeOff className="w-5 h-5 text-slate-400" /> : <Eye className="w-5 h-5 text-slate-400" />}
-                        </button>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-slate-400 mb-2">新密码</label>
-                      <input 
-                        type="password"
-                        placeholder="请输入新密码"
-                        className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm focus:outline-none focus:border-cyan-500/50 transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-slate-400 mb-2">确认新密码</label>
-                      <input 
-                        type="password"
-                        placeholder="请再次输入新密码"
-                        className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm focus:outline-none focus:border-cyan-500/50 transition-colors"
-                      />
-                    </div>
-                    <button className="px-6 py-2.5 rounded-xl bg-cyan-500 text-white text-sm font-medium hover:bg-cyan-400 transition-colors flex items-center gap-2">
-                      <Lock className="w-4 h-4" />
-                      修改密码
+            <div className="max-w-4xl space-y-6">
+              <h3 className="text-lg font-bold text-white">安全设置</h3>
+              <div className="dashboard-card rounded-2xl p-5 space-y-4">
+                <h4 className="text-white font-medium flex items-center gap-2"><Key className="w-5 h-5 text-cyan-400" />修改密码</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={passwordDraft.current_password}
+                      onChange={(e) => setPasswordDraft({ ...passwordDraft, current_password: e.target.value })}
+                      placeholder="当前密码"
+                      className="w-full px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm"
+                    />
+                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2">
+                      {showPassword ? <EyeOff className="w-4 h-4 text-slate-400" /> : <Eye className="w-4 h-4 text-slate-400" />}
                     </button>
                   </div>
+                  <input type="password" value={passwordDraft.new_password} onChange={(e) => setPasswordDraft({ ...passwordDraft, new_password: e.target.value })} placeholder="新密码" className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
+                  <input type="password" value={passwordDraft.confirm} onChange={(e) => setPasswordDraft({ ...passwordDraft, confirm: e.target.value })} placeholder="确认新密码" className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
                 </div>
+                <button type="button" onClick={savePassword} disabled={busy || !passwordDraft.current_password || !passwordDraft.new_password} className="px-5 py-2.5 rounded-xl bg-cyan-500 text-white text-sm disabled:opacity-50">
+                  修改密码
+                </button>
+              </div>
 
-                <div className="dashboard-card rounded-2xl p-5">
-                  <h4 className="text-white font-medium mb-4">安全日志</h4>
-                  <div className="space-y-3">
-                    {[
-                      { time: '2024-04-16 14:30', action: '登录系统', ip: '192.168.1.100', status: 'success' },
-                      { time: '2024-04-16 10:15', action: '修改密码', ip: '192.168.1.100', status: 'success' },
-                      { time: '2024-04-15 18:20', action: '异地登录', ip: '192.168.1.200', status: 'warning' },
-                    ].map((log, index) => (
-                      <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-slate-800/50">
+              <div className="dashboard-card rounded-2xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-white font-medium">安全审计日志</h4>
+                  <button type="button" onClick={() => mutateLogs()} disabled={!isAdmin} className="text-sm text-cyan-300 disabled:text-slate-600">刷新</button>
+                </div>
+                {!isAdmin ? (
+                  <p className="text-sm text-slate-500">仅管理员可查看全局安全日志。</p>
+                ) : (
+                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                    {(logs ?? []).map((log) => (
+                      <div key={log.id} className="flex items-center justify-between gap-4 p-3 rounded-xl bg-slate-800/50">
                         <div>
-                          <p className="text-sm text-white">{log.action}</p>
-                          <p className="text-xs text-slate-500">{log.ip}</p>
+                          <p className="text-sm text-white">{log.action} · {log.status}</p>
+                          <p className="text-xs text-slate-500">user {log.user_id ?? '—'} · {log.ip_address ?? 'unknown'} · {log.detail ?? '无详情'}</p>
                         </div>
-                        <div className="text-right">
-                          <p className="text-xs text-slate-400">{log.time}</p>
-                          <span className={`text-xs ${
-                            log.status === 'success' ? 'text-emerald-400' : 'text-amber-400'
-                          }`}>
-                            {log.status === 'success' ? '成功' : '警告'}
-                          </span>
-                        </div>
+                        <p className="text-xs text-slate-500">{new Date(log.created_at).toLocaleString('zh-CN')}</p>
                       </div>
                     ))}
+                    {!logs?.length && <p className="text-sm text-slate-500">暂无安全日志。</p>}
                   </div>
-                </div>
+                )}
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {showUserModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowUserModal(false)}>
+          <div className="dashboard-card rounded-2xl p-6 max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold text-white">{editingUser ? '编辑用户' : '添加用户'}</h3>
+              <button type="button" onClick={() => setShowUserModal(false)} className="p-2 rounded-lg hover:bg-slate-700/50">×</button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {!editingUser && (
+                <input value={userForm.username ?? ''} onChange={(e) => setUserForm({ ...userForm, username: e.target.value })} placeholder="用户名" className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
+              )}
+              <input value={userForm.full_name ?? ''} onChange={(e) => setUserForm({ ...userForm, full_name: e.target.value })} placeholder="姓名" className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
+              <input value={userForm.email ?? ''} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} placeholder="邮箱" className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
+              <input value={userForm.phone ?? ''} onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })} placeholder="电话" className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
+              <input value={userForm.department ?? ''} onChange={(e) => setUserForm({ ...userForm, department: e.target.value })} placeholder="部门" className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
+              <input value={userForm.title ?? ''} onChange={(e) => setUserForm({ ...userForm, title: e.target.value })} placeholder="职位" className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
+              <select value={userForm.role ?? 'guard'} onChange={(e) => setUserForm({ ...userForm, role: e.target.value as 'admin' | 'guard' })} className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm">
+                <option value="guard">值班人员</option>
+                <option value="admin">管理员</option>
+              </select>
+              <input type="password" value={userForm.password ?? ''} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} placeholder={editingUser ? '新密码（留空不改）' : '初始密码'} className="px-4 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white text-sm" />
+            </div>
+            <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
+              <input type="checkbox" checked={userForm.is_active !== false} onChange={(e) => setUserForm({ ...userForm, is_active: e.target.checked })} />
+              账号启用
+            </label>
+            <div className="flex justify-end gap-3 mt-6">
+              <button type="button" onClick={() => setShowUserModal(false)} className="px-5 py-2.5 rounded-xl bg-slate-700 text-white">取消</button>
+              <button type="button" onClick={saveUser} disabled={busy} className="px-5 py-2.5 rounded-xl bg-cyan-500 text-white disabled:opacity-50">保存</button>
+            </div>
+          </div>
+        </div>
+      )}
     </Sidebar>
   );
 }

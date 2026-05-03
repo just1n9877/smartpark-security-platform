@@ -4,7 +4,7 @@
 
 前端是智慧园区安防平台的统一操作入口。用户通过这里完成登录注册、查看仪表盘、管理摄像头、提交视频分析、配置场景规则、处理告警、查看数据分析、管理系统参数以及使用 AI 助手。
 
-当前前端基于 Next.js App Router 开发，界面采用深色科技风格，但页面数据尽量从 FastAPI 后端读取，避免只停留在静态演示。
+当前前端基于 Next.js App Router 开发，界面采用深色科技风格。页面数据主要来自 FastAPI 后端，便于展示真实的业务流程和数据闭环。
 
 ## 二、技术栈
 
@@ -33,11 +33,21 @@ NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 
 ## 四、本地开发
 
-先启动后端：
+先在项目根目录启动后端：
+
+Windows PowerShell：
+
+```powershell
+cd C:\path\to\smartpark-security-platform
+$env:PYTHONPATH="backend;."
+py -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+macOS / Linux：
 
 ```bash
-cd ../backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+cd /path/to/smartpark-security-platform
+PYTHONPATH=backend:. python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 再启动前端：
@@ -90,7 +100,7 @@ pm2 restart smartpark
 | `/devices` | 设备与运行状态展示 |
 | `/settings` | 阈值、反馈统计、ML 策略和系统参数 |
 
-暂未真正接入的能力会在页面中用说明文字标出，避免把占位功能说成已上线能力。
+暂未正式接入的能力会在页面中以说明文字标出，便于区分已完成能力和后续扩展能力。
 
 ## 七、目录结构
 
@@ -104,7 +114,7 @@ src/
 └── types/               # 前端类型定义
 ```
 
-## 八、开发约定
+## 八、实现约定
 
 1. 页面数据优先通过 `src/lib/api.ts` 调后端接口，不在页面里散写 API 地址。
 2. 组件样式优先使用 Tailwind 和现有科技风主题。

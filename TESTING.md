@@ -33,9 +33,21 @@ curl -s http://127.0.0.1:8000/health
 
 后端：
 
+Windows PowerShell：
+
+```powershell
+cd C:\path\to\smartpark-security-platform
+py -m pip install -r backend\requirements.txt
+$env:PYTHONPATH="backend;."
+py -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+macOS / Linux：
+
 ```bash
-cd backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+cd /path/to/smartpark-security-platform
+python -m pip install -r backend/requirements.txt
+PYTHONPATH=backend:. python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 前端：
@@ -44,12 +56,6 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 cd frontend
 npm install
 npm run dev
-```
-
-如果后端提示找不到 `services`，请从项目根目录启动：
-
-```bash
-python -m uvicorn app.main:app --app-dir backend --reload --host 0.0.0.0 --port 8000
 ```
 
 ## 二、登录与基础页面
@@ -79,7 +85,24 @@ curl -s http://127.0.0.1:8000/dashboard/summary -H "Authorization: Bearer $TOKEN
 - `/analytics`：数据分析
 - `/settings`：系统设置
 
-## 三、视频任务主流程
+## 三、前端闭环页面检查
+
+每个页面都应能看到真实后端请求，而不是只展示静态样例。浏览器开发者工具 Network 中不应长期存在 401/403/422/500；若接口失败，页面应展示可读错误。
+
+建议逐页检查：
+
+- `/dashboard`：`GET /dashboard/summary`、`GET /alerts?limit=5`、`GET /cameras` 成功；接口失败时顶部状态应显示 API 异常。
+- `/analytics`：上传视频会先 `POST /jobs`，再 `POST /jobs/{id}/run`；任务列表来自 `GET /jobs?limit=20`，应显示真实轨迹、告警数量和失败原因。
+- `/alerts`：列表来自 `GET /alerts?limit=200`；展开告警会请求 `GET /alerts/{id}/trajectory`；提交反馈会请求 `POST /alerts/{id}/feedback` 并刷新列表。
+- `/monitor`：摄像头列表、添加摄像头、启动/停止分析分别对应 `/cameras` 和 `/cameras/{id}/start|stop`。
+- `/rules`：新建、编辑、启用/停用、删除规则分别对应 `POST/PUT/DELETE /scene-rules`。
+- `/face`：新增/编辑/停用人员、上传人脸、创建/撤销授权分别对应 `/face/persons`、`/face/persons/{id}/faces`、`/face/authorizations`。
+- `/devices`：设备列表、新增、状态更新、删除来自 `/devices`，不再使用前端硬编码设备数据。
+- `/settings`：所有 Tab 都应有真实后端闭环。`预警策略` 读写 `/settings`；`个人信息` 读写 `/auth/me`；`用户管理/角色权限` 使用 `/users`；`通知设置` 使用 `/users/me/notifications`；`安全设置` 使用 `/auth/change-password` 与 `/users/security-logs`。
+
+本地联调时如果前端不是通过 `http://127.0.0.1:3000` 打开，需要确认后端 `CORS_ORIGINS` 包含实际前端 Origin，并确认 `NEXT_PUBLIC_API_BASE_URL` 指向浏览器可访问的后端地址。
+
+## 四、视频任务主流程
 
 准备一段可检测到人物的 mp4。Docker 模式建议放在 `data/videos/`，请求路径使用容器路径；源码模式使用本机绝对路径。
 
@@ -119,7 +142,7 @@ curl -s http://127.0.0.1:8000/jobs/1 -H "Authorization: Bearer $TOKEN"
 
 第一次运行 YOLO 可能会下载权重，CPU 环境下推理较慢，属于正常现象。
 
-## 四、告警与证据
+## 五、告警与证据
 
 查询告警：
 
@@ -136,7 +159,7 @@ curl -s "http://127.0.0.1:8000/alerts?limit=20" \
 
 如果没有告警，不一定是失败。短视频、没有明显停留或没有进入规则区域时，系统可能只生成轨迹不生成告警。
 
-## 五、反馈闭环
+## 六、反馈闭环
 
 对一条告警提交误报反馈。下面以告警 `1` 为例：
 
@@ -163,7 +186,7 @@ curl -s http://127.0.0.1:8000/settings \
 
 前端路径为：告警中心提交反馈，然后到系统设置查看反馈统计和阈值。
 
-## 六、数据分析与评测
+## 七、数据分析与评测
 
 数据分析页主要读取：
 
